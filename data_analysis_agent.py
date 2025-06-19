@@ -114,9 +114,7 @@ def QueryUnderstandingTool(query: str, conversation_context: str = "") -> bool:
 # ------------------  PlotCodeGeneratorTool ---------------------------
 def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "") -> str:
     """Generate a prompt for the LLM to write pandas+matplotlib code for a plot based on the query and columns."""
-    logger.info(f"📊 PlotCodeGeneratorTool: Generating plot prompt for columns: {cols}")
-    
-    # Get data types and sample values for better context
+    logger.info(f"📊 PlotCodeGeneratorTool: Generating plot prompt for columns: {cols}")    # Get data types and sample values for better context
     data_info = []
     date_columns = []
     
@@ -176,24 +174,75 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     Write Python code using pandas **and matplotlib** (as plt) to answer:
     "{query}"
 
+    PROFESSIONAL VISUALIZATION REQUIREMENTS
+    =====================================
+    1. FIGURE SETUP: Always create with `fig, ax = plt.subplots(figsize=(10, 6))` and assign `result = fig`
+    2. STYLING: Apply professional styling using these settings:
+       - plt.style.use('default')  # Use clean modern style
+       - Set figure DPI to 150 for crisp visuals: fig.set_dpi(150)
+    
+    3. COLOR PALETTE: Use professional colors:
+       - Primary: '#2E86AB' (blue), '#A23B72' (magenta), '#F18F01' (orange)
+       - Secondary: '#C73E1D' (red), '#4B9F44' (green), '#7A4B99' (purple)
+       - Use color cycling: colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#4B9F44', '#7A4B99']
+    
+    4. LEGENDS: **ALWAYS** include legends when plotting multiple series:
+       - Use descriptive labels for all plot elements
+       - Position legend optimally: ax.legend(loc='best', frameon=True, fancybox=True, shadow=True)
+       - Style legend: ax.legend(fontsize=10, title_fontsize=12, framealpha=0.9)
+    
+    5. AXES & LABELS:
+       - Always include clear titles: ax.set_title('Descriptive Title', fontsize=14, fontweight='bold', pad=20)
+       - Label axes clearly: ax.set_xlabel('Label', fontsize=12), ax.set_ylabel('Label', fontsize=12)
+       - Add subtle grid: ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    6. DATA ENHANCEMENT:
+       - Use alpha=0.7 for scatter plots for better visibility
+       - Add edge colors for bars: edgecolor='white', linewidth=0.5
+       - For line plots: linewidth=2.5, marker size=6 if markers used
+       - Round values in annotations to 2 decimal places
+    
+    7. LAYOUT & SPACING:
+       - Use tight layout: plt.tight_layout()
+       - Add padding around plot elements
+       - Remove top and right spines for cleaner look: ax.spines['top'].set_visible(False), ax.spines['right'].set_visible(False)
+
+    PLOT-SPECIFIC ENHANCEMENTS
+    =========================
+    - BAR CHARTS: Add value labels on bars, use color gradient if multiple categories
+    - SCATTER PLOTS: Use varying sizes/colors if meaningful, add trend line if correlation requested
+    - LINE PLOTS: Use different line styles for multiple series, add markers for data points
+    - HISTOGRAMS: Use transparency, add density curve if appropriate
+    - BOX PLOTS: Add individual data points as overlay, use colors for groups
+    - HEATMAPS: Include colorbar, use appropriate color map (e.g., 'RdYlBu_r' for correlation)
+
+    EXAMPLE IMPLEMENTATIONS:
+    - Scatter: ax.scatter(x, y, alpha=0.7, s=60, color='#2E86AB', edgecolors='white', linewidth=0.5, label='Data Points')
+    - Bar: ax.bar(categories, values, color=['#2E86AB', '#A23B72', '#F18F01'], edgecolor='white', linewidth=0.5)
+    - Line: ax.plot(x, y, color='#2E86AB', linewidth=2.5, marker='o', markersize=6, label='Series 1')
+
     Rules & Available Tools
     ----------------------
-         1. Use pandas and matplotlib.pyplot (as plt) - `pd`, `np`, `df`, `plt` are all available in scope.
+    1. Use pandas and matplotlib.pyplot (as plt) - `pd`, `np`, `df`, `plt` are all available in scope.
     2. For date/time columns, prefer smart_date_parser(df, 'column_name') for robust parsing.
     3. For categorical columns, convert to numeric: df['col'].map({{'Yes': 1, 'No': 0}}).
-    4. CRITICAL: Create figure with `fig, ax = plt.subplots(figsize=(8,5))` and assign `result = fig`.
-    5. Create ONE clear, well-labeled plot with ax.set_title(), ax.set_xlabel(), ax.set_ylabel().
-    6. For time series, consider df.set_index('date_col').plot() for automatic time formatting.
-    7. Handle missing values with .dropna() before plotting if needed.
-    8. Use clear colors and markers: ax.scatter(), ax.plot(), ax.bar(), etc.
-    9. Wrap code in ```python fence with no explanations.
+    4. Handle missing values with .dropna() before plotting if needed.
+    5. Wrap code in ```python fence with no explanations.
+    6. Always assign final figure to `result = fig`.
 
-    Plotting Examples:
-    - Scatter: ax.scatter(df['x'], df['y'], alpha=0.6)
-    - Time series: df.set_index('date').plot(ax=ax)
-    - Correlation heatmap: sns.heatmap(df.corr(), ax=ax) (if seaborn available)
+    PROFESSIONAL UTILITIES AVAILABLE:
+    ================================
+    - get_professional_colors(): Returns color palettes {'primary', 'blues', 'sequential', 'diverging', 'qualitative'}
+    - apply_professional_styling(ax, title, xlabel, ylabel, legend_title): Auto-applies professional styling
+    - seaborn (sns): Available for enhanced statistical plots (if installed)
+
+    USAGE EXAMPLES:
+    - colors = get_professional_colors()['primary']  # Get professional color palette
+    - ax.scatter(x, y, color=colors[0], label='Series 1')  # Use first color
+    - apply_professional_styling(ax, 'Chart Title', 'X Label', 'Y Label', 'Legend Title')  # Auto-style
+    - sns.regplot(x='col1', y='col2', data=df, ax=ax) if 'sns' in locals() else None  # Use seaborn if available
     """
-    logger.debug(f"Generated plot prompt: {prompt[:200]}...")
+    logger.debug(f"Generated enhanced plot prompt: {prompt[:200]}...")
     return prompt
 
 # ------------------  CodeWritingTool ---------------------------------
@@ -327,10 +376,44 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
     
     env = {"pd": pd, "np": np, "df": df, "smart_date_parser": smart_date_parser}
     if should_plot:
-        plt.rcParams["figure.dpi"] = 100  # Set default DPI for all figures
+        # Set up professional plotting environment
+        plt.rcParams.update({
+            "figure.dpi": 150,           # High DPI for crisp visuals
+            "figure.facecolor": "white", # Clean white background
+            "axes.facecolor": "white",   # Clean axes background
+            "axes.spines.top": False,    # Remove top spine by default
+            "axes.spines.right": False,  # Remove right spine by default
+            "axes.grid": True,           # Enable grid by default
+            "axes.grid.alpha": 0.3,      # Subtle grid
+            "axes.labelsize": 12,        # Professional label size
+            "axes.titlesize": 14,        # Professional title size
+            "axes.titleweight": "bold",  # Bold titles
+            "legend.frameon": True,      # Legend frame
+            "legend.fancybox": True,     # Fancy legend box
+            "legend.shadow": True,       # Legend shadow
+            "legend.framealpha": 0.9,    # Legend transparency
+            "legend.fontsize": 10,       # Legend font size
+            "font.size": 11,            # Default font size
+            "lines.linewidth": 2.5,     # Thicker lines
+            "lines.markersize": 6,      # Appropriate marker size
+            "xtick.labelsize": 10,      # Tick label size
+            "ytick.labelsize": 10,      # Tick label size
+        })
+        
         env["plt"] = plt
         env["io"] = io
-        logger.info("🎨 Plot environment set up with matplotlib")
+        
+        # Add professional plotting utilities
+        env["get_professional_colors"] = get_professional_colors
+        env["apply_professional_styling"] = apply_professional_styling
+        
+        # Try to import seaborn for enhanced styling (optional)
+        try:
+            import seaborn as sns
+            env["sns"] = sns
+            logger.info("🎨 Enhanced plot environment with matplotlib and seaborn")
+        except ImportError:
+            logger.info("🎨 Plot environment set up with matplotlib (seaborn not available)")
     
     try:
         logger.info("🚀 Executing code...")
@@ -518,6 +601,62 @@ def DataInsightAgent(df: pd.DataFrame) -> str:
         return error_msg
 
 # === Helpers ===========================================================
+
+def get_professional_colors():
+    """
+    Returns a professional color palette for visualizations.
+    This function is made available in the execution environment.
+    """
+    return {
+        'primary': ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#4B9F44', '#7A4B99'],
+        'blues': ['#0B4F6C', '#1B659C', '#2E86AB', '#4BA3C7', '#7BC3E4'],
+        'sequential': ['#FFF5F0', '#FEE0D2', '#FCBBA1', '#FC9272', '#FB6A4A', '#EF3B2C', '#CB181D', '#A50F15', '#67000D'],
+        'diverging': ['#D73027', '#F46D43', '#FDAE61', '#FEE08B', '#E6F598', '#ABDDA4', '#66C2A5', '#3288BD', '#5E4FA2'],
+        'qualitative': ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#4B9F44', '#7A4B99', '#9C6114', '#1F4E79']
+    }
+
+def apply_professional_styling(ax, title=None, xlabel=None, ylabel=None, legend_title=None):
+    """
+    Applies professional styling to a matplotlib axes object.
+    This function is made available in the execution environment.
+    """
+    # Remove top and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    # Style remaining spines
+    ax.spines['left'].set_color('#666666')
+    ax.spines['bottom'].set_color('#666666')
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
+    
+    # Add subtle grid
+    ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5, color='#999999')
+    ax.set_axisbelow(True)  # Grid behind data
+    
+    # Style labels and title
+    if title:
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20, color='#333333')
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=12, color='#555555')
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=12, color='#555555')
+    
+    # Style tick labels
+    ax.tick_params(axis='both', which='major', labelsize=10, colors='#666666')
+    
+    # Style legend if it exists
+    legend = ax.get_legend()
+    if legend:
+        legend.set_frame_on(True)
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_edgecolor('#CCCCCC')
+        legend.get_frame().set_linewidth(0.8)
+        legend.get_frame().set_alpha(0.95)
+        if legend_title:
+            legend.set_title(legend_title, prop={'size': 11, 'weight': 'bold'})
+    
+    return ax
 
 def smart_date_parser(df, column_name):
     """
@@ -726,8 +865,8 @@ def main():
                     if msg.get("plot_index") is not None:
                         idx = msg["plot_index"]
                         if 0 <= idx < len(st.session_state.plots):
-                            # Display plot at fixed size
-                            st.pyplot(st.session_state.plots[idx], use_container_width=False)
+                            # Display plot with better sizing for professional visualizations
+                            st.pyplot(st.session_state.plots[idx], use_container_width=True)
                     
                     # Display code in a proper expander for assistant messages
                     if msg.get("code") and msg["role"] == "assistant":
