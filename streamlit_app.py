@@ -1,13 +1,16 @@
-
 import os, io, re, logging
 import pandas as pd
 import numpy as np
 import streamlit as st
 from openai import OpenAI
 import matplotlib.pyplot as plt
+import seaborn as sns
 from typing import List, Dict, Any, Tuple
 from datetime import datetime
 import chardet
+import asyncio
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # === Configuration ===
 api_key = os.environ.get("NVIDIA_API_KEY")
@@ -27,6 +30,37 @@ client = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
     api_key=api_key
 )
+
+# === MEMORY SYSTEM =====================================================
+
+class ColumnMemoryAgent:
+    """Memory system for storing AI-generated column descriptions."""
+    
+    def __init__(self):
+        self.column_descriptions = {}
+        logger.info("🧠 ColumnMemoryAgent initialized")
+    
+    def store_column_description(self, column_name: str, description: str):
+        """Store description for a specific column."""
+        self.column_descriptions[column_name] = description
+        logger.info(f"💾 Stored description for column: {column_name}")
+    
+    def get_column_description(self, column_name: str) -> str:
+        """Retrieve description for a specific column."""
+        return self.column_descriptions.get(column_name, "")
+    
+    def get_all_descriptions(self) -> Dict[str, str]:
+        """Get all stored column descriptions."""
+        return self.column_descriptions.copy()
+    
+    def has_descriptions(self) -> bool:
+        """Check if any column descriptions are stored."""
+        return len(self.column_descriptions) > 0
+    
+    def clear_descriptions(self):
+        """Clear all stored descriptions."""
+        self.column_descriptions.clear()
+        logger.info("🗑️ Cleared all column descriptions")
 
 # === MEMORY TOOLS =====================================================
 
@@ -98,7 +132,7 @@ def QueryUnderstandingTool(query: str, conversation_context: str = "") -> bool:
     return result
 
 # ------------------  PlotCodeGeneratorTool ---------------------------
-def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "") -> str:
+def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "", memory_agent: ColumnMemoryAgent = None) -> str:
     """Generate a prompt for the LLM to write pandas+matplotlib code for a plot based on the query and columns."""
     logger.info(f"📊 PlotCodeGeneratorTool: Generating plot prompt for columns: {cols}")
     
@@ -109,6 +143,17 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     for col in cols:
         dtype = str(df[col].dtype)
         
+        # Check if we have AI-generated column description
+        if memory_agent and memory_agent.has_descriptions():
+            stored_description = memory_agent.get_column_description(col)
+            if stored_description:
+                data_info.append(f"{col} ({dtype}): {stored_description[:200]}...")
+                # Check if description mentions date/time
+                if any(keyword in stored_description.lower() for keyword in ['date', 'time', 'temporal', 'timestamp']):
+                    date_columns.append(col)
+                continue
+        
+        # Fallback to basic analysis if no stored description
         # Check if this might be a date/time column
         is_likely_date = False
         if df[col].dtype == 'object':
@@ -155,16 +200,26 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     
     """
     
+    # Add note about enhanced column information if available
+    enhancement_note = ""
+    if memory_agent and memory_agent.has_descriptions():
+        enhancement_note = """
+    
+    📈 ENHANCED MODE: Detailed AI-generated column descriptions are available above. 
+    Use this rich context to create more sophisticated and contextually relevant visualizations.
+    Consider the business meaning, data quality insights, and suggested use cases for each column.
+    """
+    
     prompt = f"""
     Given DataFrame `df` with columns and data types:
     {data_context}
-    {context_section}{date_instructions}
+    {context_section}{date_instructions}{enhancement_note}
     Write Python code using pandas **and matplotlib** (as plt) to answer:
     "{query}"
 
     Rules & Available Tools
     ----------------------
-         1. Use pandas and matplotlib.pyplot (as plt) - `pd`, `np`, `df`, `plt` are all available in scope.
+         1. Use pandas, matplotlib.pyplot (as plt), and seaborn (as sns) - `pd`, `np`, `df`, `plt`, `sns` are all available in scope.
     2. For date/time columns, prefer smart_date_parser(df, 'column_name') for robust parsing.
     3. For categorical columns, convert to numeric: df['col'].map({{'Yes': 1, 'No': 0}}).
     4. CRITICAL: Create figure with `fig, ax = plt.subplots(figsize=(8,5))` and assign `result = fig`.
@@ -172,18 +227,21 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     6. For time series, consider df.set_index('date_col').plot() for automatic time formatting.
     7. Handle missing values with .dropna() before plotting if needed.
     8. Use clear colors and markers: ax.scatter(), ax.plot(), ax.bar(), etc.
-    9. Wrap code in ```python fence with no explanations.
+    9. Leverage seaborn for enhanced statistical visualizations and better aesthetics.
+    10. Wrap code in ```python fence with no explanations.
 
     Plotting Examples:
-    - Scatter: ax.scatter(df['x'], df['y'], alpha=0.6)
+    - Scatter: ax.scatter(df['x'], df['y'], alpha=0.6) or sns.scatterplot(data=df, x='x', y='y', ax=ax)
     - Time series: df.set_index('date').plot(ax=ax)
-    - Correlation heatmap: sns.heatmap(df.corr(), ax=ax) (if seaborn available)
+    - Correlation heatmap: sns.heatmap(df.corr(), annot=True, cmap='coolwarm', ax=ax)
+    - Box plots: sns.boxplot(data=df, x='category', y='value', ax=ax)
+    - Distribution: sns.histplot(data=df, x='column', kde=True, ax=ax)
     """
     logger.debug(f"Generated plot prompt: {prompt[:200]}...")
     return prompt
 
 # ------------------  CodeWritingTool ---------------------------------
-def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "") -> str:
+def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "", memory_agent: ColumnMemoryAgent = None) -> str:
     """Generate a prompt for the LLM to write pandas-only code for a data query (no plotting)."""
     logger.info(f"📝 CodeWritingTool: Generating code prompt for columns: {cols}")
     
@@ -194,6 +252,17 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     for col in cols:
         dtype = str(df[col].dtype)
         
+        # Check if we have AI-generated column description
+        if memory_agent and memory_agent.has_descriptions():
+            stored_description = memory_agent.get_column_description(col)
+            if stored_description:
+                data_info.append(f"{col} ({dtype}): {stored_description[:200]}...")
+                # Check if description mentions date/time
+                if any(keyword in stored_description.lower() for keyword in ['date', 'time', 'temporal', 'timestamp']):
+                    date_columns.append(col)
+                continue
+        
+        # Fallback to basic analysis if no stored description
         # Check if this might be a date/time column
         is_likely_date = False
         if df[col].dtype == 'object':
@@ -240,10 +309,20 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     
     """
     
+    # Add note about enhanced column information if available
+    enhancement_note = ""
+    if memory_agent and memory_agent.has_descriptions():
+        enhancement_note = """
+    
+    📈 ENHANCED MODE: Detailed AI-generated column descriptions are available above. 
+    Use this rich context to create more sophisticated and contextually relevant analysis.
+    Consider the business meaning, data quality insights, and suggested use cases for each column.
+    """
+    
     prompt = f"""
     Given DataFrame `df` with columns and data types:
     {data_context}
-    {context_section}{date_instructions}
+    {context_section}{date_instructions}{enhancement_note}
     Write Python code (pandas **only**, no plotting) to answer:
     "{query}"
 
@@ -268,7 +347,7 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
 
 # === CodeGenerationAgent ==============================================
 
-def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] = None):
+def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] = None, memory_agent: ColumnMemoryAgent = None):
     """Selects the appropriate code generation tool and gets code from the LLM for the user's query."""
     logger.info(f"🤖 CodeGenerationAgent: Processing query: '{query}'")
     logger.info(f"📊 DataFrame info: {len(df)} rows, {len(df.columns)} columns")
@@ -279,11 +358,21 @@ def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] =
         conversation_context = ConversationMemoryTool(chat_history)
         logger.info(f"🧠 Using conversation context: {len(conversation_context)} characters")
     
+    # Add column descriptions context if available
+    if memory_agent and memory_agent.has_descriptions():
+        column_context = f"\n\nAI-Generated Column Descriptions:\n"
+        for col in df.columns:
+            desc = memory_agent.get_column_description(col)
+            if desc:
+                column_context += f"- {col}: {desc[:150]}...\n"
+        conversation_context += column_context
+        logger.info(f"🧠 Enhanced context with column descriptions: {len(conversation_context)} characters")
+    
     should_plot = QueryUnderstandingTool(query, conversation_context)
-    prompt = PlotCodeGeneratorTool(df.columns.tolist(), query, df, conversation_context) if should_plot else CodeWritingTool(df.columns.tolist(), query, df, conversation_context)
+    prompt = PlotCodeGeneratorTool(df.columns.tolist(), query, df, conversation_context, memory_agent) if should_plot else CodeWritingTool(df.columns.tolist(), query, df, conversation_context, memory_agent)
 
     messages = [
-        {"role": "system", "content": "detailed thinking off. You are a senior data scientist with expertise in pandas and statistical analysis. Write clean, efficient, production-ready code. Focus on:\n\n1. CORRECTNESS: Ensure proper variable scoping (pd, df are available)\n2. ROBUSTNESS: Handle missing values and edge cases\n3. CLARITY: Use descriptive variable names and clear logic\n4. EFFICIENCY: Prefer vectorized operations over loops\n5. BEST PRACTICES: Follow pandas conventions and data analysis patterns\n\nOutput ONLY a properly-closed ```python code block. Use smart_date_parser() for date parsing. Assign final result to 'result' variable."},
+        {"role": "system", "content": "detailed thinking off. You are a senior data scientist with expertise in pandas, matplotlib, and seaborn for statistical analysis and visualization. Write clean, efficient, production-ready code. Focus on:\n\n1. CORRECTNESS: Ensure proper variable scoping (pd, np, df, plt, sns are available)\n2. ROBUSTNESS: Handle missing values and edge cases\n3. CLARITY: Use descriptive variable names and clear logic\n4. EFFICIENCY: Prefer vectorized operations over loops\n5. BEST PRACTICES: Follow pandas conventions and leverage seaborn for enhanced visualizations\n6. AESTHETICS: Use seaborn's statistical plotting capabilities for professional-looking charts\n\nOutput ONLY a properly-closed ```python code block. Use smart_date_parser() for date parsing. Assign final result to 'result' variable."},
         {"role": "user", "content": prompt}
     ]
 
@@ -315,8 +404,9 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
     if should_plot:
         plt.rcParams["figure.dpi"] = 100  # Set default DPI for all figures
         env["plt"] = plt
+        env["sns"] = sns
         env["io"] = io
-        logger.info("🎨 Plot environment set up with matplotlib")
+        logger.info("🎨 Plot environment set up with matplotlib and seaborn")
     
     try:
         logger.info("🚀 Executing code...")
@@ -503,6 +593,217 @@ def DataInsightAgent(df: pd.DataFrame) -> str:
         logger.error(f"❌ DataInsightAgent failed: {error_msg}")
         return error_msg
 
+# === COLUMN ANALYSIS TOOLS ============================================
+
+def ColumnAnalysisAgent(df: pd.DataFrame, column_name: str) -> str:
+    """Generate AI-powered analysis and description for a specific column."""
+    logger.info(f"🔍 ColumnAnalysisAgent: Analyzing column '{column_name}'")
+    
+    col_data = df[column_name]
+    dtype = str(col_data.dtype)
+    
+    # Gather comprehensive column statistics
+    stats = {
+        'total_rows': len(col_data),
+        'non_null_count': col_data.count(),
+        'null_count': col_data.isnull().sum(),
+        'null_percentage': (col_data.isnull().sum() / len(col_data)) * 100,
+        'unique_count': col_data.nunique(),
+        'data_type': dtype
+    }
+    
+    # Get sample values (handle different data types)
+    if col_data.dtype == 'object':
+        # For text/categorical data
+        value_counts = col_data.value_counts().head(10)
+        sample_values = value_counts.index.tolist()
+        value_distribution = dict(value_counts)
+    else:
+        # For numeric data
+        sample_values = col_data.dropna().head(10).tolist()
+        if col_data.dtype in ['int64', 'float64']:
+            stats.update({
+                'min_value': col_data.min(),
+                'max_value': col_data.max(),
+                'mean': col_data.mean(),
+                'median': col_data.median(),
+                'std_dev': col_data.std()
+            })
+        value_distribution = {}
+    
+    # Check for potential date/time patterns
+    is_likely_date = False
+    if col_data.dtype == 'object':
+        sample_str_values = col_data.dropna().head(5).astype(str).tolist()
+        date_patterns = ['/', '-', ':', 'am', 'pm', 'time', 'date', '20', '19']
+        for val in sample_str_values:
+            if any(pattern in val.lower() for pattern in date_patterns):
+                is_likely_date = True
+                break
+    
+    # Build comprehensive prompt for AI analysis
+    prompt = f"""
+    Analyze this column from a dataset and provide a comprehensive description:
+    
+    Column Name: {column_name}
+    Data Type: {dtype}
+    Total Rows: {stats['total_rows']}
+    Non-null Values: {stats['non_null_count']} ({100 - stats['null_percentage']:.1f}%)
+    Missing Values: {stats['null_count']} ({stats['null_percentage']:.1f}%)
+    Unique Values: {stats['unique_count']}
+    
+    Sample Values: {sample_values[:10]}
+    
+    {f"Statistical Summary: Min={stats.get('min_value', 'N/A')}, Max={stats.get('max_value', 'N/A')}, Mean={stats.get('mean', 'N/A'):.2f}, Median={stats.get('median', 'N/A')}" if 'mean' in stats else ""}
+    
+    {f"Value Distribution (top categories): {value_distribution}" if value_distribution else ""}
+    
+    {"IMPORTANT: This appears to be a date/time column based on sample values." if is_likely_date else ""}
+    
+    Please provide a detailed analysis including:
+    1. What this column likely represents (business context)
+    2. Data quality assessment (completeness, consistency)
+    3. Potential use cases for analysis (what insights could be derived)
+    4. Any data preprocessing recommendations
+    5. Relationships this column might have with other typical business metrics
+    
+    Keep the response comprehensive but concise (3-4 paragraphs).
+    """
+    
+    try:
+        logger.info("📤 Sending column analysis request to LLM...")
+        response = client.chat.completions.create(
+            model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
+            messages=[
+                {"role": "system", "content": "You are a senior data analyst with expertise in business intelligence and data quality assessment. Provide insightful, actionable analysis of data columns."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=800
+        )
+        
+        analysis = response.choices[0].message.content
+        logger.info(f"📥 Generated column analysis: {len(analysis)} characters")
+        return analysis
+        
+    except Exception as exc:
+        error_msg = f"Error analyzing column '{column_name}': {exc}"
+        logger.error(f"❌ Column analysis failed: {error_msg}")
+        return error_msg
+
+def AnalyzeColumnBatch(df: pd.DataFrame, column: str) -> Tuple[str, str]:
+    """Single column analysis function for parallel processing with retry logic."""
+    import time
+    max_retries = 2
+    retry_delay = 1  # seconds
+    
+    for attempt in range(max_retries + 1):
+        try:
+            description = ColumnAnalysisAgent(df, column)
+            return column, description
+        except Exception as e:
+            if attempt < max_retries and ("rate limit" in str(e).lower() or "429" in str(e)):
+                logger.warning(f"⚠️ Rate limit hit for column {column}, retrying in {retry_delay}s (attempt {attempt + 1})")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                continue
+            else:
+                logger.error(f"❌ Failed to analyze column {column} after {attempt + 1} attempts: {e}")
+                return column, f"Error analyzing column: {str(e)}"
+
+def AnalyzeAllColumnsAgent(df: pd.DataFrame, memory_agent: ColumnMemoryAgent) -> str:
+    """Analyze all columns in the dataset in parallel and store descriptions in memory."""
+    import time
+    start_time = time.time()
+    
+    logger.info(f"📊 AnalyzeAllColumnsAgent: Starting PARALLEL analysis of {len(df.columns)} columns")
+    
+    columns = df.columns.tolist()
+    total_columns = len(columns)
+    
+    # Create progress tracking
+    progress_placeholder = st.empty()
+    status_placeholder = st.empty()
+    
+    completed_count = 0
+    analysis_results = {}
+    
+    # Use ThreadPoolExecutor for parallel API calls
+    # Intelligent worker count: balance speed vs rate limits
+    if total_columns <= 5:
+        max_workers = total_columns  # Small datasets: full parallelism
+    elif total_columns <= 20:
+        max_workers = min(6, total_columns)  # Medium datasets: moderate parallelism
+    else:
+        max_workers = 8  # Large datasets: conservative parallelism to avoid rate limits
+    
+    logger.info(f"🚀 Using {max_workers} parallel workers for {total_columns} columns")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all column analysis tasks
+        future_to_column = {
+            executor.submit(AnalyzeColumnBatch, df, column): column 
+            for column in columns
+        }
+        
+        # Process completed tasks as they finish
+        for future in as_completed(future_to_column):
+            column = future_to_column[future]
+            completed_count += 1
+            
+            try:
+                column_name, description = future.result()
+                analysis_results[column_name] = description
+                
+                # Store in memory
+                memory_agent.store_column_description(column_name, description)
+                
+                # Update progress
+                progress = completed_count / total_columns
+                progress_placeholder.progress(
+                    progress, 
+                    text=f"Analyzed {completed_count}/{total_columns} columns"
+                )
+                
+                # Show current status
+                status_placeholder.info(f"✅ Completed: **{column_name}** ({completed_count}/{total_columns})")
+                
+                logger.info(f"✅ Completed analysis for column: {column_name} ({completed_count}/{total_columns})")
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing future for column {column}: {e}")
+                analysis_results[column] = f"Error: {str(e)}"
+    
+    # Clear progress indicators
+    progress_placeholder.empty()
+    status_placeholder.empty()
+    
+    # Calculate performance metrics
+    end_time = time.time()
+    total_time = end_time - start_time
+    successful_analyses = sum(1 for desc in analysis_results.values() if not desc.startswith("Error"))
+    failed_analyses = total_columns - successful_analyses
+    
+    # Estimate sequential time (rough calculation)
+    estimated_sequential_time = total_time * max_workers
+    time_saved = estimated_sequential_time - total_time
+    speedup_factor = estimated_sequential_time / total_time if total_time > 0 else 1
+    
+    # Create clean, concise summary
+    successful_columns = [col for col in columns if col in analysis_results and not analysis_results[col].startswith("Error")]
+    failed_columns = [col for col in columns if col in analysis_results and analysis_results[col].startswith("Error")]
+    
+    summary = f"""🧠 **Column Analysis Complete!**
+
+✅ **Successfully analyzed {successful_analyses}/{total_columns} columns** in {total_time:.1f}s
+
+{f"⚠️ **Failed columns:** {', '.join([f'`{col}`' for col in failed_columns])}" if failed_columns else ""}
+
+🚀 **Enhanced AI mode enabled!** The chat can now provide deeper insights using detailed column understanding."""
+    
+    logger.info(f"✅ PARALLEL column analysis complete: {successful_analyses} successful, {failed_analyses} failed in {total_time:.1f}s ({speedup_factor:.1f}x speedup)")
+    return summary
+
 # === Helpers ===========================================================
 
 def smart_date_parser(df, column_name):
@@ -564,6 +865,10 @@ def main():
     # Initialize session state for authentication
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
+    
+    # Initialize column memory agent
+    if "column_memory" not in st.session_state:
+        st.session_state.column_memory = ColumnMemoryAgent()
     
     # Authentication page
     if not st.session_state.authenticated:
@@ -690,6 +995,8 @@ def main():
                 
                 st.session_state.current_file = file.name
                 st.session_state.messages = []
+                # Clear column memory for new file
+                st.session_state.column_memory.clear_descriptions()
                 logger.info(f"📊 Loaded DataFrame: {len(st.session_state.df)} rows, {len(st.session_state.df.columns)} columns")
                 with st.spinner("Generating dataset insights …"):
                     st.session_state.insights = DataInsightAgent(st.session_state.df)
@@ -704,11 +1011,108 @@ def main():
         if "messages" not in st.session_state:
             st.session_state.messages = []
 
+        # Add column analysis button if data is loaded
+        if file and "df" in st.session_state:
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+            
+            with col1:
+                analyze_button = st.button(
+                    "🧠 Analyze Columns",
+                    help="Generate AI-powered descriptions for each column to enhance analysis capabilities",
+                    use_container_width=True
+                )
+            
+            with col2:
+                # Show status of column analysis
+                if st.session_state.column_memory.has_descriptions():
+                    st.success(f"✅ {len(st.session_state.column_memory.get_all_descriptions())} columns analyzed")
+                else:
+                    st.info("💡 Click to analyze columns")
+            
+            with col3:
+                # Show analyzed columns in an expander
+                if st.session_state.column_memory.has_descriptions():
+                    with st.expander("📋 View Analyzed Columns"):
+                        analyzed_columns = list(st.session_state.column_memory.get_all_descriptions().keys())
+                        st.write(", ".join([f"`{col}`" for col in analyzed_columns]))
+            
+            with col4:
+                if st.session_state.column_memory.has_descriptions():
+                    if st.button("🗑️ Clear", help="Clear stored column descriptions", use_container_width=True):
+                        st.session_state.column_memory.clear_descriptions()
+                        st.rerun()
+            
+            # Handle column analysis button click
+            if analyze_button:
+                with st.spinner("🔍 Analyzing all columns with AI... This may take a moment."):
+                    try:
+                        analysis_summary = AnalyzeAllColumnsAgent(st.session_state.df, st.session_state.column_memory)
+                        
+                        # Add analysis summary to chat history
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": analysis_summary,
+                            "plot_index": None,
+                            "code": None
+                        })
+                        
+                        st.success("🎉 Column analysis complete! Enhanced AI understanding enabled.")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error during column analysis: {str(e)}")
+                        logger.error(f"Column analysis failed: {e}")
+            
+            st.markdown("---")
+
         chat_container = st.container()
         with chat_container:
-            for msg in st.session_state.messages:
+            for i, msg in enumerate(st.session_state.messages):
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"], unsafe_allow_html=True)
+                    
+                    # For assistant messages, add download options
+                    if msg["role"] == "assistant":
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        
+                        with col2:
+                            # Download text response
+                            # Extract clean text from the response (remove HTML)
+                            import re
+                            clean_text = re.sub(r'<[^>]+>', '', msg["content"])
+                            clean_text = re.sub(r'\n+', '\n', clean_text).strip()
+                            
+                            if clean_text:
+                                st.download_button(
+                                    label="📄 Download Text",
+                                    data=clean_text,
+                                    file_name=f"analysis_response_{i+1}.txt",
+                                    mime="text/plain",
+                                    use_container_width=True
+                                )
+                        
+                        with col3:
+                            # Download plot if available
+                            if msg.get("plot_index") is not None:
+                                idx = msg["plot_index"]
+                                if 0 <= idx < len(st.session_state.plots):
+                                    # Create download button for plot
+                                    fig = st.session_state.plots[idx]
+                                    
+                                    # Save plot to bytes buffer
+                                    img_buffer = io.BytesIO()
+                                    fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+                                    img_buffer.seek(0)
+                                    
+                                    st.download_button(
+                                        label="🖼️ Download Plot",
+                                        data=img_buffer.getvalue(),
+                                        file_name=f"plot_{i+1}.png",
+                                        mime="image/png",
+                                        use_container_width=True
+                                    )
+                    
+                    # Display plot
                     if msg.get("plot_index") is not None:
                         idx = msg["plot_index"]
                         if 0 <= idx < len(st.session_state.plots):
@@ -729,8 +1133,8 @@ def main():
                     start_time = datetime.now()
                     logger.info(f"⏱️ Processing started at {start_time}")
                     
-                    # Pass chat history to enable conversational memory
-                    code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages)
+                    # Pass chat history and column memory to enable enhanced analysis
+                    code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages, st.session_state.column_memory)
                     result_obj = ExecutionAgent(code, st.session_state.df, should_plot_flag)
                     raw_thinking, reasoning_txt = ReasoningAgent(user_q, result_obj)
                     reasoning_txt = reasoning_txt.replace("`", "")
