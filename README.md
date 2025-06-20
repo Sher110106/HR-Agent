@@ -7,7 +7,7 @@
 [![NVIDIA](https://img.shields.io/badge/NVIDIA-Llama--3.1--Nemotron-green.svg)](https://build.nvidia.com/nvidia/llama-3_1-nemotron-ultra-253b-v1)
 
 ## 🚀 Quick Start
-HOW ABOUT THIS NOW
+
 ```bash
 # Clone and setup
 git clone https://github.com/Sher110106/HR-Agent.git
