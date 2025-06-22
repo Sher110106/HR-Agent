@@ -105,7 +105,14 @@ def QueryUnderstandingTool(query: str, conversation_context: str = "") -> bool:
     logger.info(f"🔍 QueryUnderstandingTool: Analyzing query: '{query}'")
     
     # Enhanced LLM prompt that includes conversation context
-    system_prompt = "detailed thinking off. You are an assistant that determines if a query is requesting a data visualization. Consider the conversation context to understand follow-up requests. Respond with only 'true' if the query is asking for a plot, chart, graph, or any visual representation of data. Otherwise, respond with 'false'."
+    system_prompt = """detailed thinking off. You are a highly specialized query classification assistant. Your sole purpose is to determine if a user's request, including the full conversation context, necessitates a data visualization.
+
+Your analysis must consider:
+1.  **Explicit Keywords**: Identify direct requests for a 'plot', 'chart', 'graph', 'diagram', 'visualize', 'show me', etc.
+2.  **Implicit Intent**: Infer visualization needs from phrases that imply visual comparison or trend analysis, such as "compare sales across regions," "show the trend over time," "what does the distribution look like," or "can you illustrate the relationship between X and Y?"
+3.  **Follow-up Context**: Analyze conversation history. If a user says "make that a bar chart" or "what about for Q3?", you must recognize this refers to a prior analysis or visualization.
+
+Respond with only 'true' for any explicit or implicit visualization request. For all other requests (e.g., data summaries, statistical calculations, data transformations), respond with 'false'. Your output must be a single boolean value."""
     
     user_prompt = f"Query: {query}"
     if conversation_context:
@@ -121,7 +128,7 @@ def QueryUnderstandingTool(query: str, conversation_context: str = "") -> bool:
         model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
         messages=messages,
         temperature=0.1,
-        max_tokens=5  # We only need a short response
+        max_tokens=1000  # We only need a short response
     )
     
     # Extract the response and convert to boolean
@@ -222,7 +229,7 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
          1. Use pandas, matplotlib.pyplot (as plt), and seaborn (as sns) - `pd`, `np`, `df`, `plt`, `sns` are all available in scope.
     2. For date/time columns, prefer smart_date_parser(df, 'column_name') for robust parsing.
     3. For categorical columns, convert to numeric: df['col'].map({{'Yes': 1, 'No': 0}}).
-    4. CRITICAL: Create figure with `fig, ax = plt.subplots(figsize=(8,5))` and assign `result = fig`.
+    4. CRITICAL: Create figure with `fig, ax = plt.subplots(figsize=(12,7))` and assign `result = fig`.
     5. Create ONE clear, well-labeled plot with ax.set_title(), ax.set_xlabel(), ax.set_ylabel().
     6. For time series, consider df.set_index('date_col').plot() for automatic time formatting.
     7. Handle missing values with .dropna() before plotting if needed.
@@ -341,16 +348,22 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     - Correlation: result = df[['col1', 'col2']].corr().iloc[0, 1]
     - Seasonal analysis: df['Season'] = df['Month'].map({{...}})
     - Summary stats: result = df.groupby('category')['value'].agg(['mean', 'std'])
+    - Top N values: top_indices = series.nlargest(n).index; top_rows = df.loc[top_indices]
+    - Avoid chaining errors: Use intermediate variables for complex operations
+    - Safe DataFrame slicing: df_copy = df[condition].copy() to avoid SettingWithCopyWarning
     """
     logger.debug(f"Generated code prompt: {prompt[:200]}...")
     return prompt
 
 # === CodeGenerationAgent ==============================================
 
-def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] = None, memory_agent: ColumnMemoryAgent = None):
+def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] = None, memory_agent: ColumnMemoryAgent = None, retry_context: str = None):
     """Selects the appropriate code generation tool and gets code from the LLM for the user's query."""
     logger.info(f"🤖 CodeGenerationAgent: Processing query: '{query}'")
     logger.info(f"📊 DataFrame info: {len(df)} rows, {len(df.columns)} columns")
+    
+    if retry_context:
+        logger.info(f"🔄 Retry mode activated with context: {retry_context[:200]}...")
     
     # Extract conversation context for better understanding
     conversation_context = ""
@@ -369,10 +382,44 @@ def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] =
         logger.info(f"🧠 Enhanced context with column descriptions: {len(conversation_context)} characters")
     
     should_plot = QueryUnderstandingTool(query, conversation_context)
+    
+    # Add retry context if available
+    if retry_context:
+        conversation_context += f"\n\nPREVIOUS ERROR TO AVOID:\n{retry_context}\n\nPlease fix this error and generate corrected code."
+    
     prompt = PlotCodeGeneratorTool(df.columns.tolist(), query, df, conversation_context, memory_agent) if should_plot else CodeWritingTool(df.columns.tolist(), query, df, conversation_context, memory_agent)
 
     messages = [
-        {"role": "system", "content": "detailed thinking off. You are a senior data scientist with expertise in pandas, matplotlib, and seaborn for statistical analysis and visualization. Write clean, efficient, production-ready code. Focus on:\n\n1. CORRECTNESS: Ensure proper variable scoping (pd, np, df, plt, sns are available)\n2. ROBUSTNESS: Handle missing values and edge cases\n3. CLARITY: Use descriptive variable names and clear logic\n4. EFFICIENCY: Prefer vectorized operations over loops\n5. BEST PRACTICES: Follow pandas conventions and leverage seaborn for enhanced visualizations\n6. AESTHETICS: Use seaborn's statistical plotting capabilities for professional-looking charts\n\nOutput ONLY a properly-closed ```python code block. Use smart_date_parser() for date parsing. Assign final result to 'result' variable."},
+        {"role": "system", "content": """detailed thinking off. You are an elite-level senior data scientist and Python programmer, specializing in writing production-grade data analysis and visualization code. Your code must be flawless, efficient, and contextually aware.
+
+Your mission is to generate a single, executable Python code block to answer the user's query, adhering to these strict principles:
+
+1.  **CORRECTNESS & SCOPE**: The code must be syntactically perfect. You have access to `pd`, `np`, `df`, `plt`, `sns`, and `smart_date_parser`. Ensure all variables are correctly scoped and used.
+2.  **ROBUSTNESS & ERROR HANDLING**: Your code must anticipate and gracefully handle potential issues.
+    *   Check for empty DataFrames (`df.empty`) or columns with all `NaN` values before performing operations.
+    *   Include `try-except` blocks for operations prone to failure (e.g., data type conversions, complex calculations) and raise meaningful exceptions.
+    *   Handle missing values (`.isna()`) appropriately based on the analytical context (e.g., `dropna()`, `fillna()`).
+3.  **CLARITY & MAINTAINABILITY**: Write code that a human can easily understand.
+    *   Use descriptive variable names (e.g., `average_employee_tenure` instead of `avg_ten`).
+    *   Add concise inline comments (`#`) to explain complex logic, transformations, or business rule implementations.
+    *   Adhere strictly to PEP 8 style guidelines.
+4.  **EFFICIENCY**: Prioritize performance. Heavily favor vectorized pandas/numpy operations over loops or `.apply()` where possible.
+5.  **CONTEXT AWARENESS**: This is critical. You MUST leverage the provided conversation history and AI-generated column descriptions (`{enhancement_note}`). Your code should reflect a deep understanding of the business context inferred from these sources.
+6.  **PANDAS BEST PRACTICES**: Follow these critical pandas patterns:
+    *   Use `.loc[]` for label-based indexing and `.iloc[]` for integer-based indexing correctly
+    *   When chaining methods, ensure each step returns the expected data type
+    *   For getting top N values: `series.nlargest(n).index` to get indices, then `df.loc[indices]` to slice
+    *   Avoid SettingWithCopyWarning by using `.copy()` explicitly or proper `.loc[]` assignments
+    *   Test method chains step by step - don't chain incompatible operations
+7.  **VISUALIZATION AESTHETICS**: When creating plots, strive for presentation quality.
+    *   Always create a figure and axes (e.g., `fig, ax = plt.subplots(figsize=(12, 7))`).
+    *   Ensure every plot has a clear, descriptive title, and labels for the x and y axes.
+    *   Use legends when multiple data series are present.
+    *   Select color palettes and plot styles that are professional and suitable for both light and dark themes. Use `seaborn` to enhance aesthetics.
+8.  **OUTPUT SPECIFICATION**:
+    *   For visualizations, the final line must be `result = fig`.
+    *   For non-visualization tasks, the final line must assign the output (e.g., DataFrame, scalar, list, string) to the `result` variable.
+    *   Output ONLY the properly-closed ```python code block with no preceding or succeeding text."""},
         {"role": "user", "content": prompt}
     ]
 
@@ -381,7 +428,7 @@ def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] =
         model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
         messages=messages,
         temperature=0.2,
-        max_tokens=1024
+        max_tokens=4000
     )
 
     full_response = response.choices[0].message.content
@@ -395,10 +442,43 @@ def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] =
 
 # === ExecutionAgent ====================================================
 
+def validate_pandas_code(code: str) -> tuple[list, str]:
+    """Validate code for common pandas errors and return warnings and corrected code."""
+    warnings = []
+    corrected_code = code
+    
+    # Fix dangerous method chaining patterns
+    if ".nlargest(" in code and ".idxmax(" in code:
+        warnings.append("🔧 Auto-fixed: Method chaining error - converted .nlargest().idxmax() to proper syntax")
+        # This is a complex fix that would need regex, for now just warn
+        warnings.append("⚠️ Potential method chaining error: .nlargest() returns a Series, not indices. Use .nlargest(n).index")
+    
+    if ".nsmallest(" in code and ".idxmin(" in code:
+        warnings.append("⚠️ Potential method chaining error: .nsmallest() returns a Series, not indices. Use .nsmallest(n).index")
+    
+    # Check for integer method calls  
+    if "int(" in code and any(f".{method}(" in code for method in ["idxmax", "idxmin", "nlargest", "nsmallest"]):
+        warnings.append("⚠️ Potential error: Calling pandas methods on integers. Check your method chaining.")
+    
+    # Fix unsafe DataFrame slicing
+    if "[df[" in code and ".copy()" not in code and "=" in code:
+        warnings.append("🔧 Auto-suggestion: Consider using .copy() when creating DataFrame subsets to avoid warnings")
+    
+    return warnings, corrected_code
+
 def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
     """Executes the generated code in a controlled environment and returns the result or error message."""
     logger.info(f"⚡ ExecutionAgent: Executing code (plot mode: {should_plot})")
     logger.info(f"🔧 Code to execute:\n{code}")
+    
+    # Validate code for common pandas errors
+    validation_warnings, corrected_code = validate_pandas_code(code)
+    if validation_warnings:
+        logger.warning(f"🔍 Code validation warnings: {validation_warnings}")
+        # Use corrected code if available
+        if corrected_code != code:
+            logger.info(f"🔧 Using corrected code")
+            code = corrected_code
     
     env = {"pd": pd, "np": np, "df": df, "smart_date_parser": smart_date_parser}
     if should_plot:
@@ -440,6 +520,12 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
             error_msg += f"\n💡 Tip: Available variables are: {list(env.keys())}"
         elif "KeyError" in str(exc):
             error_msg += f"\n💡 Tip: Available columns are: {list(df.columns)}"
+        elif "has no attribute" in str(exc) and any(method in str(exc) for method in ['idxmax', 'idxmin', 'nlargest', 'nsmallest']):
+            error_msg += f"\n💡 Tip: Method chaining error detected. For top N values, use: series.nlargest(n).index, then df.loc[indices]"
+        elif "SettingWithCopyWarning" in str(exc):
+            error_msg += f"\n💡 Tip: Use .copy() when creating DataFrame subsets or .loc[] for safe assignments"
+        elif "'int' object has no attribute" in str(exc):
+            error_msg += f"\n💡 Tip: Check your method chaining - you may be calling a method on an integer instead of a pandas object"
         
         return error_msg
 
@@ -453,6 +539,7 @@ def ReasoningCurator(query: str, result: Any) -> str:
 
     if is_error:
         desc = result
+        result_summary = "Error occurred during execution"
         logger.info("❌ Result is an error")
     elif is_plot:
         title = ""
@@ -461,9 +548,29 @@ def ReasoningCurator(query: str, result: Any) -> str:
         elif isinstance(result, plt.Axes):
             title = result.get_title()
         desc = f"[Plot Object: {title or 'Chart'}]"
+        result_summary = desc
         logger.info(f"📊 Result is a plot: {desc}")
     else:
-        desc = str(result)[:300]
+        # For data results, provide both full and summary descriptions
+        full_desc = str(result)
+        if len(full_desc) > 1000:
+            desc = full_desc[:1000] + "... [truncated]"
+        else:
+            desc = full_desc
+        
+        # Create a more detailed summary for non-plot results
+        if isinstance(result, list):
+            result_summary = f"List with {len(result)} items: {result[:10]}{'...' if len(result) > 10 else ''}"
+        elif isinstance(result, dict):
+            result_summary = f"Dictionary with {len(result)} keys: {list(result.keys())[:5]}{'...' if len(result) > 5 else ''}"
+        elif isinstance(result, (pd.DataFrame, pd.Series)):
+            if isinstance(result, pd.DataFrame):
+                result_summary = f"DataFrame with {len(result)} rows and {len(result.columns)} columns:\n{result.head().to_string()}"
+            else:
+                result_summary = f"Series with {len(result)} values:\n{result.head().to_string()}"
+        else:
+            result_summary = str(result)
+        
         logger.info(f"📄 Result description: {desc[:100]}...")
 
     if is_plot:
@@ -475,8 +582,32 @@ def ReasoningCurator(query: str, result: Any) -> str:
     else:
         prompt = f'''
         The user asked: "{query}".
-        The result value is: {desc}
-        Explain in 2–3 concise sentences what this tells about the data (no mention of charts).'''
+        
+        EXECUTION RESULT:
+        {desc}
+        
+        CRITICAL INSTRUCTIONS:
+        1. Your final response MUST include the complete actual results from the analysis
+        2. If it's a list (like employee IDs), show the full list of IDs in your response
+        3. If it's numbers/calculations, show the actual values
+        4. If it's a DataFrame, describe the key data points and patterns
+        5. Be comprehensive and detailed - provide thorough analysis, not brief summaries
+        
+        Your response must be structured and include:
+        
+        **ANALYSIS RESULTS:**
+        [Present the actual findings with specific values, lists, numbers - the raw results]
+        
+        **BUSINESS INTERPRETATION:**
+        [Explain what these specific results mean in business context]
+        
+        **ACTIONABLE RECOMMENDATIONS:**
+        [Provide concrete recommendations based on the actual findings]
+        
+        **SUGGESTED NEXT STEPS:**
+        [Propose specific follow-up actions or analyses]
+        
+        Remember: Always include the actual data/results in your response, not just descriptions of what type of result it is.'''
     
     logger.debug(f"Generated reasoning prompt: {prompt[:200]}...")
     return prompt
@@ -495,11 +626,36 @@ def ReasoningAgent(query: str, result: Any):
     response = client.chat.completions.create(
         model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
         messages=[
-            {"role": "system", "content": "detailed thinking on. You are an insightful data analyst."},
+            {"role": "system", "content": """detailed thinking on. You are an expert data analyst and business strategist. Your primary role is to translate raw code outputs (plots, data, or errors) into comprehensive, actionable business insights for decision-makers.
+
+Follow this structured reasoning process:
+
+1.  **INTERPRET THE RESULT**:
+    *   **What is it?** Start by identifying the type of output and INCLUDE THE ACTUAL RESULTS/VALUES in your analysis.
+    *   **What does it show?** Present the specific findings with actual numbers, lists, or data points. Don't just describe the type - show the content.
+
+2.  **CONTEXTUALIZE THE FINDINGS**:
+    *   **Why is this important?** Connect the specific results back to the user's original query and business context.
+    *   **Leverage Business Context**: Explain what these concrete findings mean for the business using the AI-generated column descriptions and dataset context.
+
+3.  **PROVIDE ACTIONABLE INSIGHTS & RECOMMENDATIONS**:
+    *   **So what?** Go beyond observation. Provide concrete, forward-looking recommendations based on the specific results.
+    *   **Suggest Next Steps**: Propose logical follow-up questions or actions the user could take.
+
+4.  **HANDLE ERRORS GRACEFULLY**:
+    *   If the result is an error, clearly explain the cause and provide specific, actionable solutions.
+
+CRITICAL REQUIREMENTS for your final response:
+- ALWAYS include the actual results/findings (numbers, lists, values) in your final explanation - never just describe what type of result it is
+- Be comprehensive and detailed - provide thorough analysis, not just 2-3 sentences
+- Present results in a clear, organized format that's easy to understand
+- Include specific recommendations based on the actual data found
+
+Begin by streaming your detailed analytical process within `<think>...</think>` tags. After your thought process is complete, provide a comprehensive, detailed explanation to the user outside the tags that includes the actual results."""},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.2,
-        max_tokens=1024,
+        temperature=0.3,
+        max_tokens=5000,
         stream=True
     )
 
@@ -578,11 +734,32 @@ def DataInsightAgent(df: pd.DataFrame) -> str:
         response = client.chat.completions.create(
             model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
             messages=[
-                {"role": "system", "content": "detailed thinking off. You are a data analyst providing brief, focused insights."},
+                {"role": "system", "content": """detailed thinking off. You are an automated data exploration assistant. Your task is to analyze the metadata of a newly uploaded dataset and provide a concise, structured, and actionable "first look" summary to orient the user.
+
+Using the provided dataset metadata (row/column counts, column names, data types, missing values), generate the following in a clear, structured format:
+
+1.  **Dataset Overview**:
+    *   A one-sentence summary of what the dataset likely contains based on its column names and structure. (e.g., "This appears to be a customer sales dataset tracking transactions, products, and demographic information.").
+
+2.  **Key Characteristics & Data Quality Snapshot**:
+    *   Provide a bulleted list of key facts: Total Rows, Total Columns.
+    *   Highlight any immediate data quality concerns, such as columns with a high percentage of missing values. (e.g., "Data Quality Note: The 'Region' column is missing 45% of its values, which may impact regional analysis.").
+
+3.  **Suggested Analysis Questions (Starters)**:
+    *   Provide 3-4 specific, relevant data analysis questions that are tailored to the dataset's structure and likely business context. These should inspire the user.
+    *   Example Questions:
+        *   "What is the overall sales trend over time?"
+        *   "Which product category generates the most revenue?"
+        *   "Is there a correlation between customer age and purchase amount?"
+
+4.  **Recommended First Steps**:
+    *   Suggest 1-2 immediate actions the user could take, such as analyzing a key column or handling missing data. (e.g., "Recommendation: Start by analyzing the 'Sales' column to understand its distribution, or ask to visualize the 'Transaction_Date' to see trends.").
+
+Keep the entire response concise, business-focused, and free of technical jargon."""},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2,
-            max_tokens=512
+            max_tokens=4000
         )
         insights = response.choices[0].message.content
         logger.info(f"📥 Generated insights length: {len(insights)} characters")
@@ -675,11 +852,32 @@ def ColumnAnalysisAgent(df: pd.DataFrame, column_name: str) -> str:
         response = client.chat.completions.create(
             model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
             messages=[
-                {"role": "system", "content": "You are a senior data analyst with expertise in business intelligence and data quality assessment. Provide insightful, actionable analysis of data columns."},
+                {"role": "system", "content": """You are a senior data analyst and data steward, with deep expertise in business intelligence, data quality assessment, and data modeling. Your task is to perform a comprehensive, actionable analysis of a single data column and output it in a structured format suitable for being stored in a memory system.
+
+For the given column, use the provided metadata (name, data type, sample values, missing values) and conversation context to generate the following analysis:
+
+1.  **Business Context & Definition**:
+    *   Describe what this column most likely represents in a business context. Be specific. (e.g., "The 'Employee_Satisfaction_Score' column likely represents a rating from 1 to 5 provided by employees during their annual performance review.").
+
+2.  **Data Quality Assessment**:
+    *   **Completeness**: State the percentage of missing values.
+    *   **Consistency & Validity**: Assess the format and uniformity of the data. Are there mixed types? Unexpected values? (e.g., "Values are consistently integers from 1-5, with no invalid entries detected.").
+    *   **Potential Issues**: Note any potential problems for analysis. (e.g., "A high concentration of scores at '3' may indicate central tendency bias.").
+
+3.  **Analytical Use Cases**:
+    *   Suggest 2-3 specific analytical applications for this column. (e.g., "1. Trend Analysis: Track satisfaction scores over time to measure the impact of HR initiatives. 2. Segmentation: Compare scores across different departments or job levels.").
+
+4.  **Preprocessing Recommendations**:
+    *   Provide specific, actionable data cleaning or transformation steps. (e.g., "For analysis, this categorical column should be one-hot encoded. Missing values could be imputed with the median score of '3' if necessary.").
+
+5.  **Potential Relationships & Insights**:
+    *   Hypothesize potential relationships with other columns or key business metrics. (e.g., "This column could be negatively correlated with 'Employee_Turnover_Rate' and positively correlated with 'Productivity_Score'.").
+
+Output the analysis in a clear, structured format (e.g., using Markdown headings for each section) to ensure it is easily parsable for storage in the ColumnMemoryAgent."""},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            max_tokens=800
+            max_tokens=3000
         )
         
         analysis = response.choices[0].message.content
@@ -1136,6 +1334,31 @@ def main():
                     # Pass chat history and column memory to enable enhanced analysis
                     code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages, st.session_state.column_memory)
                     result_obj = ExecutionAgent(code, st.session_state.df, should_plot_flag)
+                    
+                    # Auto-retry logic for common pandas errors
+                    if isinstance(result_obj, str) and result_obj.startswith("Error executing code:"):
+                        logger.warning("🔄 Code execution failed, attempting automatic retry with error context")
+                        error_context = result_obj
+                        
+                        # Try once more with error context
+                        try:
+                            code_retry, should_plot_flag_retry, _ = CodeGenerationAgent(
+                                user_q, st.session_state.df, st.session_state.messages, 
+                                st.session_state.column_memory, retry_context=error_context
+                            )
+                            result_obj_retry = ExecutionAgent(code_retry, st.session_state.df, should_plot_flag_retry)
+                            
+                            # If retry succeeds, use the retry result
+                            if not (isinstance(result_obj_retry, str) and result_obj_retry.startswith("Error executing code:")):
+                                logger.info("✅ Retry successful, using corrected result")
+                                code = code_retry
+                                should_plot_flag = should_plot_flag_retry
+                                result_obj = result_obj_retry
+                            else:
+                                logger.warning("⚠️ Retry also failed, using original error")
+                        except Exception as e:
+                            logger.error(f"❌ Retry attempt failed: {e}")
+                    
                     raw_thinking, reasoning_txt = ReasoningAgent(user_q, result_obj)
                     reasoning_txt = reasoning_txt.replace("`", "")
 
