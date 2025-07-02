@@ -86,6 +86,8 @@ flowchart LR
 | 💬 **Natural Queries** | Plain English interactions | No coding required |
 | 📊 **Pro Visualizations** | Publication-ready charts | Business presentations |
 | 🧠 **Transparent AI** | Visible reasoning process | Trust & understanding |
+| 🧪 **Dual-Output Plots** | Chart + source data table | Rich analysis & easy export |
+| 🧬 **Column Memory** | AI-powered column descriptions | Context-aware insights |
 
 ## 🎨 Enhanced Visualizations
 
@@ -95,6 +97,7 @@ flowchart LR
 - **Automatic legends** with professional styling
 - **Clean typography** and consistent spacing
 - **Value annotations** and trend lines
+- **Source data tables** alongside each plot for transparency & easy export
 
 ### Supported Chart Types
 ```mermaid
@@ -211,14 +214,13 @@ streamlit run streamlit_app.py
 ## 📁 Project Structure
 
 ```
-HR-Agent/
-├── streamlit_app.py           # Main app entry point
-├── data_analysis_agent.py     # Core agent logic
+data-analysis-agent/
+├── streamlit_app.py           # Streamlit application entry
+├── utils/
+│   ├── __init__.py            # Helper exports
+│   └── plot_helpers.py        # Visualization utilities
 ├── requirements.txt           # Dependencies
-├── README.md                  # Documentation
-└── assets/                    # Static assets
-    ├── workflow.png
-    └── data_analysis_agent_demo.png
+└── README.md                  # Documentation
 ```
 
 ## 🔒 Security Features
@@ -270,6 +272,24 @@ Licensed under the Apache License, Version 2.0. See source files for details.
 - [NVIDIA Llama-3.1-Nemotron](https://build.nvidia.com/nvidia/llama-3_1-nemotron-ultra-253b-v1)
 - [Streamlit Documentation](https://docs.streamlit.io/)
 - [Data Visualization Best Practices](https://oyasalofa.medium.com/the-art-of-documentation-in-data-analysis-building-your-portfolio-with-precision-7138251acf77)
+
+## 🔄 Recent Enhancements (v0.3)
+
+- **Dual-Output Visualization System** – every plot now returns a tuple `(fig, data_df)` enabling instant data-table previews and one-click **PNG / CSV** export.
+- **Column Memory Agent** – automatic, parallel column profiling supplies rich business context for dramatically deeper insights.
+- **Enhanced Error Recovery** – automatic retry mechanism fixes common `pandas` mistakes before they reach the user.
+- **Professional Plot Helpers** – shared helpers (`add_value_labels`, `format_axis_labels`, `apply_professional_styling`, …) guarantee publication-ready charts.
+
+```mermaid
+graph LR
+    subgraph "Dual-Output Pipeline"
+        Q[User Query] --> R[CodeGenerationAgent]
+        R --> S[ExecutionAgent]
+        S --> T[(fig, data_df)]
+        T --> U[Streamlit UI]
+        U --> V[[Download PNG / CSV]]
+    end
+```
 
 ---
 

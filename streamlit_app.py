@@ -140,7 +140,15 @@ Respond with only 'true' for any explicit or implicit visualization request. For
 
 # ------------------  PlotCodeGeneratorTool ---------------------------
 def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "", memory_agent: ColumnMemoryAgent = None) -> str:
-    """Generate a prompt for the LLM to write pandas+matplotlib code for a plot based on the query and columns."""
+    """
+    Generate a prompt for the LLM to write pandas+matplotlib code for a plot based on the query and columns.
+    
+    The generated code will return a tuple (fig, data_df) where:
+    - fig: matplotlib figure object with professional styling and value labels
+    - data_df: pandas DataFrame containing the aggregated data used to create the plot
+    
+    This enables dual output for enhanced analysis and data export capabilities.
+    """
     logger.info(f"📊 PlotCodeGeneratorTool: Generating plot prompt for columns: {cols}")
     
     # Get data types and sample values for better context
@@ -224,25 +232,71 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     Write Python code using pandas **and matplotlib** (as plt) to answer:
     "{query}"
 
+    CRITICAL NEW REQUIREMENTS - DUAL OUTPUT PLOTS
+    ============================================
+    Your code MUST return BOTH the plot figure AND the underlying data as a tuple: `result = (fig, data_df)`
+    
+    1. **Create the figure**: `fig, ax = plt.subplots(figsize=(12,7))`
+    2. **Prepare plot data**: Create a DataFrame called `data_df` containing the aggregated/processed data used for the plot
+    3. **Build the visualization**: Use ax.bar(), ax.scatter(), ax.plot(), etc.
+    4. **Add automatic value labels**: Call helper functions to add value labels to every bar/point
+    5. **Format axes**: Apply proper axis formatting and rotation for readability
+    6. **Apply professional styling**: Use helper functions for consistent appearance
+    7. **Return tuple**: `result = (fig, data_df)` where data_df contains the plot's source data
+
+    Available Helper Functions
+    -------------------------
+    You have access to these pre-built helper functions (import them as needed):
+    - `add_value_labels(ax)` - Automatically adds value labels to bars and points
+    - `format_axis_labels(ax, x_rotation=45)` - Rotates and wraps long axis labels
+    - `apply_professional_styling(ax, title="", xlabel="", ylabel="")` - Applies consistent styling
+    - `get_professional_colors()['colors']` - Returns professional color palette
+    - `optimize_figure_size(ax)` - Adjusts figure size based on content
+
+    Mandatory Code Structure
+    -----------------------
+    ```python
+    # 1. Data preparation and aggregation
+    data_df = df.groupby('category')['value'].sum().reset_index()  # Example - adapt to your query
+    
+    # 2. Create figure
+    fig, ax = plt.subplots(figsize=(12, 7))
+    
+    # 3. Create the plot
+    colors = get_professional_colors()['colors']
+    ax.bar(data_df['category'], data_df['value'], color=colors[0])
+    
+    # 4. Add value labels (MANDATORY)
+    add_value_labels(ax)
+    
+    # 5. Format axes (MANDATORY)  
+    format_axis_labels(ax, x_rotation=45)
+    
+    # 6. Apply styling (MANDATORY)
+    apply_professional_styling(ax, title="Chart Title", xlabel="X Label", ylabel="Y Label")
+    
+    # 7. Return both figure and data (MANDATORY)
+    result = (fig, data_df)
+    ```
+
     Rules & Available Tools
     ----------------------
-         1. Use pandas, matplotlib.pyplot (as plt), and seaborn (as sns) - `pd`, `np`, `df`, `plt`, `sns` are all available in scope.
+    1. Use pandas, matplotlib.pyplot (as plt), and seaborn (as sns) - `pd`, `np`, `df`, `plt`, `sns` are all available in scope.
     2. For date/time columns, prefer smart_date_parser(df, 'column_name') for robust parsing.
     3. For categorical columns, convert to numeric: df['col'].map({{'Yes': 1, 'No': 0}}).
-    4. CRITICAL: Create figure with `fig, ax = plt.subplots(figsize=(12,7))` and assign `result = fig`.
-    5. Create ONE clear, well-labeled plot with ax.set_title(), ax.set_xlabel(), ax.set_ylabel().
-    6. For time series, consider df.set_index('date_col').plot() for automatic time formatting.
-    7. Handle missing values with .dropna() before plotting if needed.
-    8. Use clear colors and markers: ax.scatter(), ax.plot(), ax.bar(), etc.
-    9. Leverage seaborn for enhanced statistical visualizations and better aesthetics.
+    4. **CRITICAL**: Always return tuple `result = (fig, data_df)` - NOT just fig!
+    5. Always call `add_value_labels(ax)` after creating the plot.
+    6. Always call `format_axis_labels(ax)` for proper axis formatting.
+    7. Always call `apply_professional_styling(ax, title, xlabel, ylabel)`.
+    8. Handle missing values with .dropna() before plotting if needed.
+    9. Use professional color palette: `colors = get_professional_colors()['colors']`
     10. Wrap code in ```python fence with no explanations.
 
-    Plotting Examples:
-    - Scatter: ax.scatter(df['x'], df['y'], alpha=0.6) or sns.scatterplot(data=df, x='x', y='y', ax=ax)
-    - Time series: df.set_index('date').plot(ax=ax)
-    - Correlation heatmap: sns.heatmap(df.corr(), annot=True, cmap='coolwarm', ax=ax)
-    - Box plots: sns.boxplot(data=df, x='category', y='value', ax=ax)
-    - Distribution: sns.histplot(data=df, x='column', kde=True, ax=ax)
+    Enhanced Plotting Examples:
+    - Bar chart: Create data_df → ax.bar() → add_value_labels(ax) → format_axis_labels(ax) → return (fig, data_df)
+    - Scatter plot: Create data_df → ax.scatter() → add_value_labels(ax) → format_axis_labels(ax) → return (fig, data_df)  
+    - Line chart: Create data_df → ax.plot() → add_value_labels(ax) → format_axis_labels(ax) → return (fig, data_df)
+    - Heatmap: Create data_df → sns.heatmap() → format_axis_labels(ax) → return (fig, data_df)
     """
     logger.debug(f"Generated plot prompt: {prompt[:200]}...")
     return prompt
@@ -390,36 +444,16 @@ def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] =
     prompt = PlotCodeGeneratorTool(df.columns.tolist(), query, df, conversation_context, memory_agent) if should_plot else CodeWritingTool(df.columns.tolist(), query, df, conversation_context, memory_agent)
 
     messages = [
-        {"role": "system", "content": """detailed thinking off. You are an elite-level senior data scientist and Python programmer, specializing in writing production-grade data analysis and visualization code. Your code must be flawless, efficient, and contextually aware.
+        {"role": "system", "content": """detailed thinking off. You are a senior data scientist with expertise in pandas, matplotlib, and seaborn for statistical analysis and visualization. Write clean, efficient, production-ready code. Focus on:
 
-Your mission is to generate a single, executable Python code block to answer the user's query, adhering to these strict principles:
+1. CORRECTNESS: Ensure proper variable scoping (pd, np, df, plt, sns are available)
+2. ROBUSTNESS: Handle missing values and edge cases
+3. CLARITY: Use descriptive variable names and clear logic
+4. EFFICIENCY: Prefer vectorized operations over loops
+5. BEST PRACTICES: Follow pandas conventions and leverage seaborn for enhanced visualizations
+6. AESTHETICS: Use seaborn's statistical plotting capabilities for professional-looking charts
 
-1.  **CORRECTNESS & SCOPE**: The code must be syntactically perfect. You have access to `pd`, `np`, `df`, `plt`, `sns`, and `smart_date_parser`. Ensure all variables are correctly scoped and used.
-2.  **ROBUSTNESS & ERROR HANDLING**: Your code must anticipate and gracefully handle potential issues.
-    *   Check for empty DataFrames (`df.empty`) or columns with all `NaN` values before performing operations.
-    *   Include `try-except` blocks for operations prone to failure (e.g., data type conversions, complex calculations) and raise meaningful exceptions.
-    *   Handle missing values (`.isna()`) appropriately based on the analytical context (e.g., `dropna()`, `fillna()`).
-3.  **CLARITY & MAINTAINABILITY**: Write code that a human can easily understand.
-    *   Use descriptive variable names (e.g., `average_employee_tenure` instead of `avg_ten`).
-    *   Add concise inline comments (`#`) to explain complex logic, transformations, or business rule implementations.
-    *   Adhere strictly to PEP 8 style guidelines.
-4.  **EFFICIENCY**: Prioritize performance. Heavily favor vectorized pandas/numpy operations over loops or `.apply()` where possible.
-5.  **CONTEXT AWARENESS**: This is critical. You MUST leverage the provided conversation history and AI-generated column descriptions (`{enhancement_note}`). Your code should reflect a deep understanding of the business context inferred from these sources.
-6.  **PANDAS BEST PRACTICES**: Follow these critical pandas patterns:
-    *   Use `.loc[]` for label-based indexing and `.iloc[]` for integer-based indexing correctly
-    *   When chaining methods, ensure each step returns the expected data type
-    *   For getting top N values: `series.nlargest(n).index` to get indices, then `df.loc[indices]` to slice
-    *   Avoid SettingWithCopyWarning by using `.copy()` explicitly or proper `.loc[]` assignments
-    *   Test method chains step by step - don't chain incompatible operations
-7.  **VISUALIZATION AESTHETICS**: When creating plots, strive for presentation quality.
-    *   Always create a figure and axes (e.g., `fig, ax = plt.subplots(figsize=(12, 7))`).
-    *   Ensure every plot has a clear, descriptive title, and labels for the x and y axes.
-    *   Use legends when multiple data series are present.
-    *   Select color palettes and plot styles that are professional and suitable for both light and dark themes. Use `seaborn` to enhance aesthetics.
-8.  **OUTPUT SPECIFICATION**:
-    *   For visualizations, the final line must be `result = fig`.
-    *   For non-visualization tasks, the final line must assign the output (e.g., DataFrame, scalar, list, string) to the `result` variable.
-    *   Output ONLY the properly-closed ```python code block with no preceding or succeeding text."""},
+Output ONLY a properly-closed ```python code block. Use smart_date_parser() for date parsing. Assign final result to 'result' variable."""},
         {"role": "user", "content": prompt}
     ]
 
@@ -467,7 +501,15 @@ def validate_pandas_code(code: str) -> tuple[list, str]:
     return warnings, corrected_code
 
 def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
-    """Executes the generated code in a controlled environment and returns the result or error message."""
+    """
+    Executes the generated code in a controlled environment and returns the result or error message.
+    
+    For plotting code, this may return either:
+    - Legacy format: single matplotlib figure/axes object  
+    - New dual-output format: tuple of (fig, data_df) where data_df contains the plot's source data
+    
+    Helper functions are available in the execution environment for enhanced plotting.
+    """
     logger.info(f"⚡ ExecutionAgent: Executing code (plot mode: {should_plot})")
     logger.info(f"🔧 Code to execute:\n{code}")
     
@@ -486,7 +528,22 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         env["plt"] = plt
         env["sns"] = sns
         env["io"] = io
-        logger.info("🎨 Plot environment set up with matplotlib and seaborn")
+        
+        # Import helper functions for enhanced plotting
+        try:
+            from utils.plot_helpers import (
+                add_value_labels, format_axis_labels, optimize_figure_size,
+                apply_professional_styling, get_professional_colors
+            )
+            env["add_value_labels"] = add_value_labels
+            env["format_axis_labels"] = format_axis_labels
+            env["optimize_figure_size"] = optimize_figure_size
+            env["apply_professional_styling"] = apply_professional_styling 
+            env["get_professional_colors"] = get_professional_colors
+            logger.info("🎨 Plot environment set up with matplotlib, seaborn, and helper functions")
+        except ImportError as e:
+            logger.warning(f"⚠️ Could not import plot helpers: {e}")
+            logger.info("🎨 Plot environment set up with matplotlib and seaborn only")
     
     try:
         logger.info("🚀 Executing code...")
@@ -496,12 +553,24 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         
         if result is not None:
             result_type = type(result).__name__
+            
+            # Check for new tuple format (fig, data_df)
+            if isinstance(result, tuple) and len(result) == 2:
+                fig, data = result
+                if isinstance(fig, (plt.Figure, plt.Axes)) and isinstance(data, pd.DataFrame):
+                    logger.info(f"✅ Execution successful: Tuple with plot figure and DataFrame ({len(data)} rows, {len(data.columns)} columns)")
+                    logger.info("🎯 New dual-output format detected - plot with underlying data")
+                    return result  # Return the tuple as-is
+                else:
+                    logger.warning(f"⚠️ Tuple result detected but not in expected (fig, data_df) format: {type(fig)}, {type(data)}")
+            
+            # Handle legacy single results
             if isinstance(result, pd.DataFrame):
                 logger.info(f"✅ Execution successful: DataFrame with {len(result)} rows, {len(result.columns)} columns")
             elif isinstance(result, pd.Series):
                 logger.info(f"✅ Execution successful: Series with {len(result)} elements")
             elif isinstance(result, (plt.Figure, plt.Axes)):
-                logger.info(f"✅ Execution successful: {result_type} plot object")
+                logger.info(f"✅ Execution successful: {result_type} plot object (legacy format)")
             else:
                 logger.info(f"✅ Execution successful: {result_type} = {str(result)[:100]}...")
         else:
@@ -536,8 +605,31 @@ def ReasoningCurator(query: str, result: Any) -> str:
     
     is_error = isinstance(result, str) and result.startswith("Error executing code")
     is_plot = isinstance(result, (plt.Figure, plt.Axes))
+    is_dual_output = isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], (plt.Figure, plt.Axes)) and isinstance(result[1], pd.DataFrame)
 
-    if is_error:
+    if is_dual_output:
+        # Handle new dual-output format (fig, data_df)
+        fig, data_df = result
+        
+        # Get plot description
+        title = ""
+        if isinstance(fig, plt.Figure):
+            title = fig._suptitle.get_text() if fig._suptitle else ""
+        elif isinstance(fig, plt.Axes):
+            title = fig.get_title()
+        
+        plot_desc = f"[Enhanced Plot with Data: {title or 'Professional Chart'}]"
+        
+        # Get data description with actual values
+        if len(data_df) <= 20:
+            data_desc = f"Source Data ({len(data_df)} rows, {len(data_df.columns)} columns):\n{data_df.to_string()}"
+        else:
+            data_desc = f"Source Data ({len(data_df)} rows, {len(data_df.columns)} columns):\n{data_df.head(10).to_string()}\n... [showing first 10 rows]"
+        
+        desc = f"{plot_desc}\n\n{data_desc}"
+        logger.info(f"📊 Result is dual-output: plot with {len(data_df)} data rows")
+        
+    elif is_error:
         desc = result
         result_summary = "Error occurred during execution"
         logger.info("❌ Result is an error")
@@ -573,7 +665,40 @@ def ReasoningCurator(query: str, result: Any) -> str:
         
         logger.info(f"📄 Result description: {desc[:100]}...")
 
-    if is_plot:
+    if is_dual_output:
+        prompt = f'''
+        The user asked: "{query}".
+        
+        ENHANCED DUAL-OUTPUT ANALYSIS RESULT:
+        {desc}
+        
+        CRITICAL INSTRUCTIONS FOR DUAL-OUTPUT:
+        1. You have BOTH a professional visualization AND the complete source data
+        2. Your response MUST include analysis of BOTH components:
+           - Describe what the chart/visualization shows visually
+           - Present and analyze the actual numerical data from the source table
+        3. Provide comprehensive analysis using the specific data values shown
+        4. Cross-reference between the visual patterns and the underlying numbers
+        
+        Your response must be structured and include:
+        
+        **VISUALIZATION ANALYSIS:**
+        [Describe what the chart shows visually - trends, patterns, comparisons]
+        
+        **DATA INSIGHTS:**
+        [Present the actual numerical findings from the source data table with specific values]
+        
+        **COMBINED INTERPRETATION:**
+        [Explain how the visual and numerical data work together to tell the story]
+        
+        **BUSINESS RECOMMENDATIONS:**
+        [Provide actionable insights based on both the chart patterns and specific data values]
+        
+        **NEXT STEPS:**
+        [Suggest follow-up analyses leveraging both visual and data components]
+        
+        Remember: Always reference the specific data values from the source table in your analysis.'''
+    elif is_plot:
         prompt = f'''
         The user asked: "{query}".
         Below is a description of the plot result:
@@ -1103,6 +1228,8 @@ def main():
     # Main application (only accessible after authentication)
     if "plots" not in st.session_state:
         st.session_state.plots = []
+    if "plot_data" not in st.session_state:
+        st.session_state.plot_data = []
 
     logger.info("🚀 Starting Streamlit app - User authenticated")
 
@@ -1271,9 +1398,19 @@ def main():
                     
                     # For assistant messages, add download options
                     if msg["role"] == "assistant":
-                        col1, col2, col3 = st.columns([2, 1, 1])
+                        # Check if this is dual-output (has both plot and data)
+                        has_data = msg.get("data_index") is not None
+                        has_plot = msg.get("plot_index") is not None
                         
-                        with col2:
+                        if has_data and has_plot:
+                            # Dual output: 4 columns for text, data CSV, plot PNG, and spacing
+                            col1, col2, col3, col4 = st.columns([1.5, 1, 1, 1])
+                        else:
+                            # Legacy: 3 columns
+                            col1, col2, col3 = st.columns([2, 1, 1])
+                            col4 = None
+                        
+                        with col1 if not has_data else col2:
                             # Download text response
                             # Extract clean text from the response (remove HTML)
                             import re
@@ -1289,13 +1426,34 @@ def main():
                                     use_container_width=True
                                 )
                         
-                        with col3:
-                            # Download plot if available
-                            if msg.get("plot_index") is not None:
-                                idx = msg["plot_index"]
-                                if 0 <= idx < len(st.session_state.plots):
+                        # Download CSV data if available (dual-output only)
+                        if has_data and col4:
+                            with col3:
+                                data_idx = msg["data_index"]
+                                if 0 <= data_idx < len(st.session_state.get("plot_data", [])):
+                                    data_df = st.session_state.plot_data[data_idx]
+                                    
+                                    # Convert DataFrame to CSV
+                                    csv_buffer = io.StringIO()
+                                    data_df.to_csv(csv_buffer, index=False)
+                                    csv_data = csv_buffer.getvalue()
+                                    
+                                    st.download_button(
+                                        label="📊 Download Data (CSV)",
+                                        data=csv_data,
+                                        file_name=f"plot_data_{i+1}.csv",
+                                        mime="text/csv",
+                                        use_container_width=True
+                                    )
+                        
+                        # Download plot if available
+                        plot_col = col4 if has_data else col3
+                        if has_plot and plot_col:
+                            with plot_col:
+                                plot_idx = msg["plot_index"]
+                                if 0 <= plot_idx < len(st.session_state.plots):
                                     # Create download button for plot
-                                    fig = st.session_state.plots[idx]
+                                    fig = st.session_state.plots[plot_idx]
                                     
                                     # Save plot to bytes buffer
                                     img_buffer = io.BytesIO()
@@ -1316,6 +1474,27 @@ def main():
                         if 0 <= idx < len(st.session_state.plots):
                             # Display plot at fixed size
                             st.pyplot(st.session_state.plots[idx], use_container_width=False)
+                    
+                    # Display data table for dual-output
+                    if msg.get("data_index") is not None:
+                        data_idx = msg["data_index"]
+                        if 0 <= data_idx < len(st.session_state.get("plot_data", [])):
+                            data_df = st.session_state.plot_data[data_idx]
+                            
+                            # Show data table with expandable section
+                            with st.expander(f"📊 View Source Data ({len(data_df)} rows, {len(data_df.columns)} columns)", expanded=False):
+                                st.dataframe(
+                                    data_df, 
+                                    use_container_width=True,
+                                    height=min(400, len(data_df) * 35 + 40)  # Adaptive height
+                                )
+                                
+                                # Add summary statistics for numeric columns
+                                numeric_cols = data_df.select_dtypes(include=[np.number]).columns
+                                if len(numeric_cols) > 0:
+                                    st.markdown("**Summary Statistics:**")
+                                    summary_stats = data_df[numeric_cols].describe()
+                                    st.dataframe(summary_stats, use_container_width=True)
                     
                     # Display code in a proper expander for assistant messages
                     if msg.get("code") and msg["role"] == "assistant":
@@ -1366,15 +1545,37 @@ def main():
                     processing_time = (end_time - start_time).total_seconds()
                     logger.info(f"⏱️ Total processing time: {processing_time:.2f} seconds")
 
-                # Build assistant response
+                # Build assistant response - handle dual output format
+                is_dual_output = isinstance(result_obj, tuple) and len(result_obj) == 2 and isinstance(result_obj[0], (plt.Figure, plt.Axes)) and isinstance(result_obj[1], pd.DataFrame)
                 is_plot = isinstance(result_obj, (plt.Figure, plt.Axes))
                 plot_idx = None
-                if is_plot:
+                data_idx = None
+                
+                if is_dual_output:
+                    # Handle new dual-output format (fig, data_df)
+                    fig, data_df = result_obj
+                    
+                    # Store plot
+                    st.session_state.plots.append(fig)
+                    plot_idx = len(st.session_state.plots) - 1
+                    
+                    # Store data (create data storage if it doesn't exist)
+                    if "plot_data" not in st.session_state:
+                        st.session_state.plot_data = []
+                    st.session_state.plot_data.append(data_df)
+                    data_idx = len(st.session_state.plot_data) - 1
+                    
+                    header = "Here is your enhanced visualization with underlying data:"
+                    logger.info(f"📊 Dual-output added: plot at index {plot_idx}, data at index {data_idx} ({len(data_df)} rows)")
+                    
+                elif is_plot:
+                    # Handle legacy single plot format
                     fig = result_obj.figure if isinstance(result_obj, plt.Axes) else result_obj
                     st.session_state.plots.append(fig)
                     plot_idx = len(st.session_state.plots) - 1
                     header = "Here is the visualization you requested:"
-                    logger.info(f"📊 Plot added to session state at index {plot_idx}")
+                    logger.info(f"📊 Legacy plot added to session state at index {plot_idx}")
+                    
                 elif isinstance(result_obj, (pd.DataFrame, pd.Series)):
                     header = f"Result: {len(result_obj)} rows" if isinstance(result_obj, pd.DataFrame) else "Result series"
                     logger.info(f"📄 Data result: {header}")
@@ -1403,6 +1604,7 @@ def main():
                     "role": "assistant",
                     "content": assistant_msg,
                     "plot_index": plot_idx,
+                    "data_index": data_idx,  # Store data index for dual-output
                     "code": code  # Store code separately
                 })
                 
