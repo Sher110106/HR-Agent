@@ -205,66 +205,6 @@ def format_axis_labels(ax: plt.Axes, x_rotation: float = 45,
             pass
 
 
-def optimize_figure_size(ax: plt.Axes, base_width: float = 12, 
-                        base_height: float = 7, min_width: float = 8) -> None:
-    """
-    Dynamically adjust figure size based on content.
-    
-    Args:
-        ax: The matplotlib axes object
-        base_width: Base width for the figure (default: 12)
-        base_height: Base height for the figure (default: 7)
-        min_width: Minimum width for the figure (default: 8)
-    """
-    # Get the current figure
-    fig = ax.get_figure()
-    
-    # Count x-axis labels to determine needed width
-    x_labels = ax.get_xticklabels()
-    visible_labels = sum(1 for label in x_labels if label.get_visible())
-    
-    # Adjust width based on number of labels
-    if visible_labels > 10:
-        width_factor = min(visible_labels / 10, 2.0)  # Cap at 2x
-        new_width = max(base_width * width_factor, min_width)
-    else:
-        new_width = base_width
-    
-    # Set the new figure size
-    fig.set_size_inches(new_width, base_height)
-    
-    # Adjust layout to prevent label cutoff
-    fig.tight_layout(pad=2.0)
-
-
-def create_data_summary(data: Union[dict, list, np.ndarray]) -> str:
-    """
-    Create a text summary of the data used in the plot.
-    
-    Args:
-        data: The data to summarize
-        
-    Returns:
-        A formatted string summary of the data
-    """
-    if isinstance(data, dict):
-        summary = "Data Summary:\n"
-        for key, value in data.items():
-            if isinstance(value, (int, float)):
-                if abs(value) >= 1000:
-                    summary += f"  {key}: {value:,.2f}\n"
-                else:
-                    summary += f"  {key}: {value:.2f}\n"
-            else:
-                summary += f"  {key}: {value}\n"
-        return summary
-    elif isinstance(data, (list, np.ndarray)):
-        data_array = np.array(data)
-        return f"Data Summary:\n  Count: {len(data_array)}\n  Min: {np.min(data_array):.2f}\n  Max: {np.max(data_array):.2f}\n  Mean: {np.mean(data_array):.2f}"
-    else:
-        return f"Data Summary: {str(data)[:200]}..."
-
-
 def apply_professional_styling(ax: plt.Axes, title: str = "", 
                               xlabel: str = "", ylabel: str = "") -> None:
     """

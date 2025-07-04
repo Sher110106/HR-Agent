@@ -25,6 +25,11 @@ streamlit run streamlit_app.py
 - Username: `Plaksha-HR`
 - Password: `AgentHR1`
 
+## 📖 Documentation
+
+- **Technical Manual** – deep dive into architecture, setup & APIs: [Technical.md](Technical.md)
+- **User Manual** – step-by-step guide for end users: [User_Manual.md](User_Manual.md)
+
 ## 🏗️ System Architecture
 
 ```mermaid
@@ -87,7 +92,6 @@ flowchart LR
 | 📊 **Pro Visualizations** | Publication-ready charts | Business presentations |
 | 🧠 **Transparent AI** | Visible reasoning process | Trust & understanding |
 | 🧪 **Dual-Output Plots** | Chart + source data table | Rich analysis & easy export |
-| 🧬 **Column Memory** | AI-powered column descriptions | Context-aware insights |
 
 ## 🎨 Enhanced Visualizations
 
@@ -276,7 +280,6 @@ Licensed under the Apache License, Version 2.0. See source files for details.
 ## 🔄 Recent Enhancements (v0.3)
 
 - **Dual-Output Visualization System** – every plot now returns a tuple `(fig, data_df)` enabling instant data-table previews and one-click **PNG / CSV** export.
-- **Column Memory Agent** – automatic, parallel column profiling supplies rich business context for dramatically deeper insights.
 - **Enhanced Error Recovery** – automatic retry mechanism fixes common `pandas` mistakes before they reach the user.
 - **Professional Plot Helpers** – shared helpers (`add_value_labels`, `format_axis_labels`, `apply_professional_styling`, …) guarantee publication-ready charts.
 

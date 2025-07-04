@@ -5,7 +5,7 @@ The Streamlit-based HR Data-Analysis Agent is intentionally architected to alway
 1. **Query Classification** – `QueryUnderstandingTool` quickly checks the latest user prompt (and the last few chat turns) with NVIDIA Llama-3 to decide whether a plot is required.  It returns a Boolean flag `should_plot`.
 2. **Code Generation** –
    • If `should_plot` is **True**, `PlotCodeGeneratorTool` is invoked.  The LLM receives:
-     – A rich description of every column (type, sample values, and AI-generated business meaning from `ColumnMemoryAgent`).
+     – (feature removed) – column descriptions no longer pre-computed.
      – Clear **template instructions** to build the figure **and** return it **together** with the aggregated data in a tuple:
      ```python
      result = (fig, data_df)  # <- CRITICAL!
@@ -31,7 +31,7 @@ The Streamlit-based HR Data-Analysis Agent is intentionally architected to alway
 | Stage | Key Component(s) | Purpose |
 |-------|------------------|---------|
 | **1. Ingestion** | `st.file_uploader` → `pd.read_csv` | Securely load the HR CSV.  Basic type inference + encoding detection (`chardet`). |
-| **2. Auto-Profiling** | `DataInsightAgent` & `AnalyzeAllColumnsAgent` | Run asynchronous column analysis in a `ThreadPoolExecutor` to create business-level metadata (min/max, common values, AI descriptions).  Stored in `ColumnMemoryAgent`. |
+| **2. Dataset Insight** | `DataInsightAgent` | Generate a quick "first look" summary (row/column counts, missing values, sample analysis questions). |
 | **3. Conversation Memory** | `ConversationMemoryTool` | Supplies the last 4 chat turns to every subsequent LLM call for context preservation. |
 | **4. Intent Detection** | `QueryUnderstandingTool` | Fast Boolean → does the request need a visualisation? |
 | **5. Code Generation** | (`PlotCodeGeneratorTool` *or* `CodeWritingTool`) inside `CodeGenerationAgent` | Drafts fully-formed, *executable* pandas/matplotlib code.  Special prompts enforce best-practice styling, high-DPI, value labels, etc. |
@@ -44,8 +44,6 @@ The Streamlit-based HR Data-Analysis Agent is intentionally architected to alway
 
 * **Dual-Output Contract** – Enforced in the prompt & checked at runtime, enabling one-click export and further analysis.
 * **Professional Styling** – `utils/plot_helpers.py` provides helpers (`add_value_labels`, `apply_professional_styling`, …) so every chart is presentation-ready.
-* **Column Memory** – Persisted descriptions deepen future analyses (e.g., "salary" recognised as monetary, "hire_date" as temporal) → smarter visual defaults.
-* **Scalable Concurrency** – Heavy column profiling runs in threads; LLM calls run async where possible to keep UI snappy.
 * **Robust Error Recovery** – Automatic second-pass code regeneration slashes typical pandas syntax errors (>80 % success in testing).
 
 ---
