@@ -11,7 +11,7 @@ import pandas as pd
 
 from .memory import ConversationMemoryTool, ColumnMemoryAgent, SystemPromptMemoryAgent, enhance_prompt_with_context
 from app_core.api import make_llm_call
-from app_core.helpers import extract_first_code_block
+from agents.data_analysis import extract_first_code_block
 from utils.cache import code_cache
 
 logger = logging.getLogger(__name__)
@@ -47,12 +47,23 @@ Respond with only 'true' for any explicit or implicit visualization request. For
     ]
     
     logger.info("📤 Sending query understanding request to LLM...")
-    response = make_llm_call(
-        messages=messages,
-        model="nvidia/llama-3.1-nemotron-ultra-253b-v1", 
-        temperature=0.1,
-        max_tokens=1000
-    )
+    try:
+        response = make_llm_call(
+            messages=messages,
+            model="gpt-4.1", 
+            temperature=0.1,
+            max_tokens=1000
+        )
+    except Exception as e:
+        # Graceful degradation – if the LLM is unreachable, fall back to heuristic
+        logger.error(f"❌ QueryUnderstandingTool failed – falling back to heuristic: {e}")
+        keyword_triggers = [
+            "plot", "chart", "graph", "diagram", "visualise", "visualize",
+            "show me", "trend", "compare", "distribution", "relationship"
+        ]
+        heuristic = any(kw in query.lower() for kw in keyword_triggers)
+        logger.info(f"🔍 Heuristic visualization detection result: {heuristic}")
+        return heuristic
     
     # Extract the response and convert to boolean
     intent_response = response.choices[0].message.content.strip().lower()
@@ -400,12 +411,18 @@ Output ONLY a properly-closed ```python code block. Use smart_date_parser() for 
     ]
 
     logger.info("📤 Sending code generation request to LLM...")
-    response = make_llm_call(
-        messages=messages,
-        model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
-        temperature=0.2,
-        max_tokens=4000
-    )
+    try:
+        response = make_llm_call(
+            messages=messages,
+            model="gpt-4.1",
+            temperature=0.2,
+            max_tokens=4000
+        )
+    except Exception as e:
+        logger.error(f"❌ Code generation LLM call failed: {e}")
+        # Propagate a structured error so the UI can show meaningful message
+        error_msg = f"Error generating code: {e}"
+        return error_msg, False, ""
 
     full_response = response.choices[0].message.content
     logger.info(f"📥 LLM full response length: {len(full_response)} characters")

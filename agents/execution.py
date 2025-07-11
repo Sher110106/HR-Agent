@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from app_core.helpers import smart_date_parser
+from agents.data_analysis import smart_date_parser
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,13 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
     
     try:
         logger.info("🚀 Executing code...")
-        # Use env as both globals and locals to ensure proper variable access
-        exec(code, env, env)
+        from utils.sandbox import build_sandbox_globals
+
+        # Build restricted globals dict combining SAFE_BUILTINS with our env vars
+        sandbox_globals = build_sandbox_globals(env)
+
+        # Execute untrusted code inside the hardened sandbox
+        exec(code, sandbox_globals, sandbox_globals)
         result = env.get("result", None)
         
         if result is not None:

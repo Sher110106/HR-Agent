@@ -178,7 +178,7 @@ Begin by streaming your detailed analytical process within `<think>...</think>` 
     
     response = make_llm_call(
         messages=messages,
-        model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
+        model="gpt-4.1",
         temperature=0.3,
         max_tokens=5000,
         stream=True
@@ -193,26 +193,50 @@ Begin by streaming your detailed analytical process within `<think>...</think>` 
 
     logger.info("📥 Starting to receive streaming response...")
     for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            token = chunk.choices[0].delta.content
-            token_count += 1
-            full_response += token
+        # Robust handling for streaming chunks that may be malformed or empty
+        try:
+            # Skip empty chunks
+            if not chunk:
+                continue
 
-            # Simple state machine to extract <think>...</think> as it streams
-            if "<think>" in token:
-                in_think = True
-                token = token.split("<think>", 1)[1]
-                logger.debug("🤔 Started thinking section")
-            if "</think>" in token:
-                token = token.split("</think>", 1)[0]
-                in_think = False
-                logger.debug("🤔 Ended thinking section")
-            if in_think or ("<think>" in full_response and not "</think>" in full_response):
-                thinking_content += token
-                thinking_placeholder.markdown(
-                    f'<details class="thinking" open><summary>🤔 Model Thinking</summary><pre>{thinking_content}</pre></details>',
-                    unsafe_allow_html=True
-                )
+            # Ensure the chunk has choices and at least one choice
+            choices = getattr(chunk, "choices", None)
+            if not choices or len(choices) == 0:
+                continue
+
+            # Take the first choice (OpenAI returns one choice for streaming)
+            choice = choices[0]
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+
+            token = getattr(delta, "content", None)
+            if token is None:
+                continue
+        except Exception as e:
+            # Log and skip any malformed chunk to prevent entire reasoning from crashing
+            logger.warning(f"⚠️ Skipping malformed stream chunk: {e}")
+            continue
+
+        # If we reach here, we have a valid token to process
+        token_count += 1
+        full_response += token
+
+        # Simple state machine to extract <think>...</think> as it streams
+        if "<think>" in token:
+            in_think = True
+            token = token.split("<think>", 1)[1]
+            logger.debug("🤔 Started thinking section")
+        if "</think>" in token:
+            token = token.split("</think>", 1)[0]
+            in_think = False
+            logger.debug("🤔 Ended thinking section")
+        if in_think or ("<think>" in full_response and not "</think>" in full_response):
+            thinking_content += token
+            thinking_placeholder.markdown(
+                f'<details class="thinking" open><summary>🤔 Model Thinking</summary><pre>{thinking_content}</pre></details>',
+                unsafe_allow_html=True
+            )
 
     logger.info(f"📥 Streaming complete: {token_count} tokens received")
     logger.info(f"🧠 Thinking content length: {len(thinking_content)} characters")

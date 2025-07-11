@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import List, Dict, Any, Tuple
-from openai import OpenAI
+from openai import AzureOpenAI
 
 from utils.metrics import api_call_timer, code_execution_timer, record_error
 from utils.circuit_breaker import (
@@ -11,13 +11,22 @@ from utils.circuit_breaker import (
 logger = logging.getLogger(__name__)
 
 # Initialize client
-api_key = os.environ.get("NVIDIA_API_KEY")
-client = OpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key=api_key
+api_key = os.environ.get("Azure_Key")
+if not api_key:
+    raise EnvironmentError("Azure_Key environment variable not set. Please export Azure_Key with your Azure OpenAI API key.")
+
+AZURE_DEPLOYMENT_NAME = "gpt-4.1"  # Default Azure OpenAI deployment
+AZURE_ENDPOINT = "https://ai-sherpartap11019601ai587562462851.openai.azure.com"  # No trailing slash after domain
+AZURE_API_VERSION = "2025-01-01-preview"
+
+# Use AzureOpenAI client which knows how to build resource URLs internally
+client = AzureOpenAI(
+    azure_endpoint=AZURE_ENDPOINT,
+    api_key=api_key,
+    api_version=AZURE_API_VERSION
 )
 
-def make_llm_call(messages: List[Dict], model: str = "nvidia/llama-3.1-nemotron-ultra-253b-v1", 
+def make_llm_call(messages: List[Dict], model: str = AZURE_DEPLOYMENT_NAME, 
                   temperature: float = 0.2, max_tokens: int = 4000, stream: bool = False):
     """Make LLM API call with circuit breaker protection and metrics tracking."""
     

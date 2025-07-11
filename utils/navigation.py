@@ -154,7 +154,7 @@ class NavigationRegistry:
             return True
             
         except Exception as e:
-            logger.error(f"🧭 Error rendering page '{page_id}': {e}")
+            logger.exception(f"🧭 Error rendering page '{page_id}': {e}")
             return False
     
     def list_pages(self) -> Dict[str, PageConfig]:
