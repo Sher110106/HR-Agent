@@ -339,113 +339,107 @@ def data_analysis_page():
                 logger.info(f"💬 User query received: '{user_q}'")
                 st.session_state.messages.append({"role": "user", "content": user_q})
                 
-                from utils.job_queue import submit_analysis_job, get_job_status, get_job_result
-
-                # Submit background job and immediately store reference
-                if "analysis_jobs" not in st.session_state:
-                    st.session_state.analysis_jobs = {}
-
-                job_id = submit_analysis_job(user_q, st.session_state.df, st.session_state.messages)
-                st.session_state.analysis_jobs[job_id] = {
-                    "query": user_q,
-                    "start_time": datetime.now(),
-                }
-
-                logger.info(f"📤 Analysis job submitted: {job_id}")
-                st.rerun()
-
-        # ------------------------------------------------------------
-        # Process completed background analysis jobs (if any)
-        # ------------------------------------------------------------
-        if "analysis_jobs" in st.session_state and st.session_state.analysis_jobs:
-            from utils.job_queue import get_job_status, JobStatus, get_job_result
-
-            completed_ids = []
-            for job_id, meta in st.session_state.analysis_jobs.items():
-                status = get_job_status(job_id)
-                if status == JobStatus.DONE:
-                    logger.info(f"✅ Analysis job {job_id} completed")
-                    result_payload = get_job_result(job_id)
-
-                    code = result_payload["code"]
-                    should_plot_flag = result_payload["should_plot"]
-                    result_obj = result_payload["result"]
-
-                    # Generate reasoning (still blocking but small)
-                    raw_thinking, reasoning_txt = ReasoningAgent(meta["query"], result_obj)
+                with st.spinner("Working …"):
+                    start_time = datetime.now()
+                    logger.info(f"⏱️ Processing started at {start_time}")
+                    
+                    # Pass chat history and column memory to enable enhanced analysis
+                    code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages)
+                    result_obj = ExecutionAgent(code, st.session_state.df, should_plot_flag)
+                    
+                    # Auto-retry logic for common pandas errors
+                    if isinstance(result_obj, str) and result_obj.startswith("Error executing code:"):
+                        logger.warning("🔄 Code execution failed, attempting automatic retry with error context")
+                        error_context = result_obj
+                        
+                        # Try once more with error context
+                        try:
+                            code_retry, should_plot_flag_retry, _ = CodeGenerationAgent(
+                                user_q, st.session_state.df, st.session_state.messages, 
+                                retry_context=error_context
+                            )
+                            result_obj_retry = ExecutionAgent(code_retry, st.session_state.df, should_plot_flag_retry)
+                            
+                            # If retry succeeds, use the retry result
+                            if not (isinstance(result_obj_retry, str) and result_obj_retry.startswith("Error executing code:")):
+                                logger.info("✅ Retry successful, using corrected result")
+                                code = code_retry
+                                should_plot_flag = should_plot_flag_retry
+                                result_obj = result_obj_retry
+                            else:
+                                logger.warning("⚠️ Retry also failed, using original error")
+                        except Exception as e:
+                            logger.error(f"❌ Retry attempt failed: {e}")
+                    
+                    raw_thinking, reasoning_txt = ReasoningAgent(user_q, result_obj)
                     reasoning_txt = reasoning_txt.replace("`", "")
 
-                    # Build assistant response - handle dual output format
-                    # (reuse legacy logic)
+                    end_time = datetime.now()
+                    processing_time = (end_time - start_time).total_seconds()
+                    logger.info(f"⏱️ Total processing time: {processing_time:.2f} seconds")
 
-                    is_dual_output = isinstance(result_obj, tuple) and len(result_obj) == 2 and isinstance(result_obj[0], (plt.Figure, plt.Axes)) and isinstance(result_obj[1], pd.DataFrame)
-                    is_plot = isinstance(result_obj, (plt.Figure, plt.Axes))
-                    plot_idx = None
-                    data_idx = None
+                # Build assistant response - handle dual output format
+                is_dual_output = isinstance(result_obj, tuple) and len(result_obj) == 2 and isinstance(result_obj[0], (plt.Figure, plt.Axes)) and isinstance(result_obj[1], pd.DataFrame)
+                is_plot = isinstance(result_obj, (plt.Figure, plt.Axes))
+                plot_idx = None
+                data_idx = None
+                
+                if is_dual_output:
+                    # Handle new dual-output format (fig, data_df)
+                    fig, data_df = result_obj
                     
-                    if is_dual_output:
-                        # Handle new dual-output format (fig, data_df)
-                        fig, data_df = result_obj
-                        
-                        # Store plot
-                        st.session_state.plots.append(fig)
-                        plot_idx = len(st.session_state.plots) - 1
-                        
-                        # Store data (create data storage if it doesn't exist)
-                        if "plot_data" not in st.session_state:
-                            st.session_state.plot_data = []
-                        st.session_state.plot_data.append(data_df)
-                        data_idx = len(st.session_state.plot_data) - 1
-                        
-                        header = "Here is your enhanced visualization with underlying data:"
-                        logger.info(f"📊 Dual-output added: plot at index {plot_idx}, data at index {data_idx} ({len(data_df)} rows)")
-                        
-                    elif is_plot:
-                        # Handle legacy single plot format
-                        fig = result_obj.figure if isinstance(result_obj, plt.Axes) else result_obj
-                        st.session_state.plots.append(fig)
-                        plot_idx = len(st.session_state.plots) - 1
-                        header = "Here is the visualization you requested:"
-                        logger.info(f"📊 Legacy plot added to session state at index {plot_idx}")
-                        
-                    elif isinstance(result_obj, (pd.DataFrame, pd.Series)):
-                        header = f"Result: {len(result_obj)} rows" if isinstance(result_obj, pd.DataFrame) else "Result series"
-                        logger.info(f"📄 Data result: {header}")
-                    else:
-                        header = f"Result: {result_obj}"
-                        logger.info(f"📄 Scalar result: {header}")
+                    # Store plot
+                    st.session_state.plots.append(fig)
+                    plot_idx = len(st.session_state.plots) - 1
+                    
+                    # Store data (create data storage if it doesn't exist)
+                    if "plot_data" not in st.session_state:
+                        st.session_state.plot_data = []
+                    st.session_state.plot_data.append(data_df)
+                    data_idx = len(st.session_state.plot_data) - 1
+                    
+                    header = "Here is your enhanced visualization with underlying data:"
+                    logger.info(f"📊 Dual-output added: plot at index {plot_idx}, data at index {data_idx} ({len(data_df)} rows)")
+                    
+                elif is_plot:
+                    # Handle legacy single plot format
+                    fig = result_obj.figure if isinstance(result_obj, plt.Axes) else result_obj
+                    st.session_state.plots.append(fig)
+                    plot_idx = len(st.session_state.plots) - 1
+                    header = "Here is the visualization you requested:"
+                    logger.info(f"📊 Legacy plot added to session state at index {plot_idx}")
+                    
+                elif isinstance(result_obj, (pd.DataFrame, pd.Series)):
+                    header = f"Result: {len(result_obj)} rows" if isinstance(result_obj, pd.DataFrame) else "Result series"
+                    logger.info(f"📄 Data result: {header}")
+                else:
+                    header = f"Result: {result_obj}"
+                    logger.info(f"📄 Scalar result: {header}")
 
-                    # Show only reasoning thinking in Model Thinking (collapsed by default)
-                    thinking_html = ""
-                    if raw_thinking:
-                        thinking_html = (
-                            '<details class="thinking">'
-                            '<summary>🧠 Reasoning</summary>'
-                            f'<pre>{raw_thinking}</pre>'
-                            '</details>'
-                        )
+                # Show only reasoning thinking in Model Thinking (collapsed by default)
+                thinking_html = ""
+                if raw_thinking:
+                    thinking_html = (
+                        '<details class="thinking">'
+                        '<summary>🧠 Reasoning</summary>'
+                        f'<pre>{raw_thinking}</pre>'
+                        '</details>'
+                    )
 
-                    # Show model explanation directly 
-                    explanation_html = reasoning_txt
+                # Show model explanation directly 
+                explanation_html = reasoning_txt
 
-                    # Store code separately for proper display
-                    # Combine thinking and explanation
-                    assistant_msg = f"{thinking_html}{explanation_html}"
+                # Store code separately for proper display
+                # Combine thinking and explanation
+                assistant_msg = f"{thinking_html}{explanation_html}"
 
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": assistant_msg,
-                        "plot_index": plot_idx,
-                        "data_index": data_idx,
-                        "code": code,
-                    })
-
-                    completed_ids.append(job_id)
-
-            # Remove completed jobs from tracking dict
-            for jid in completed_ids:
-                st.session_state.analysis_jobs.pop(jid, None)
-
-            if completed_ids:
-                logger.info("📨 New assistant messages added, rerunning app")
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": assistant_msg,
+                    "plot_index": plot_idx,
+                    "data_index": data_idx,  # Store data index for dual-output
+                    "code": code  # Store code separately
+                })
+                
+                logger.info("✅ Response added to chat history, rerunning app")
                 st.rerun() 

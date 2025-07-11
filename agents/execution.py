@@ -89,13 +89,8 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
     
     try:
         logger.info("🚀 Executing code...")
-        from utils.sandbox import build_sandbox_globals
-
-        # Build restricted globals dict combining SAFE_BUILTINS with our env vars
-        sandbox_globals = build_sandbox_globals(env)
-
-        # Execute untrusted code inside the hardened sandbox
-        exec(code, sandbox_globals, sandbox_globals)
+        # Use env as both globals and locals to ensure proper variable access
+        exec(code, env, env)
         result = env.get("result", None)
         
         if result is not None:
