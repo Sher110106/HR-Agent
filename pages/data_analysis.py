@@ -227,6 +227,25 @@ def data_analysis_page():
         with chat_container:
             for i, msg in enumerate(st.session_state.messages):
                 with st.chat_message(msg["role"]):
+                    # Enhanced error display for assistant messages
+                    if msg["role"] == "assistant" and isinstance(msg["content"], str) and (
+                        msg["content"].startswith("Error executing code:") or msg["content"].startswith("Error generating code:")
+                    ):
+                        # Show error prominently
+                        st.error("An error occurred while processing your request.")
+                        # Show summary and collapsible technical details
+                        error_lines = msg["content"].split("\n")
+                        summary = error_lines[0]
+                        details = "\n".join(error_lines[1:])
+                        st.markdown(f"**Summary:** {summary}")
+                        if details.strip():
+                            with st.expander("Technical Details", expanded=False):
+                                st.code(details, language="text")
+                        # Suggest retry if likely transient
+                        if "network" in msg["content"].lower() or "timeout" in msg["content"].lower() or "LLM" in msg["content"]:
+                            st.info("You may try again or check your network connection.")
+                        continue
+                    # Normal message rendering
                     st.markdown(msg["content"], unsafe_allow_html=True)
                     
                     # For assistant messages, add download options
@@ -307,27 +326,6 @@ def data_analysis_page():
                         if 0 <= idx < len(st.session_state.plots):
                             # Display plot at fixed size
                             st.pyplot(st.session_state.plots[idx], use_container_width=False)
-                    
-                    # Display data table for dual-output
-                    if msg.get("data_index") is not None:
-                        data_idx = msg["data_index"]
-                        if 0 <= data_idx < len(st.session_state.get("plot_data", [])):
-                            data_df = st.session_state.plot_data[data_idx]
-                            
-                            # Show data table with expandable section
-                            with st.expander(f"📊 View Source Data ({len(data_df)} rows, {len(data_df.columns)} columns)", expanded=False):
-                                st.dataframe(
-                                    data_df, 
-                                    use_container_width=True,
-                                    height=min(400, len(data_df) * 35 + 40)  # Adaptive height
-                                )
-                                
-                                # Add summary statistics for numeric columns
-                                numeric_cols = data_df.select_dtypes(include=[np.number]).columns
-                                if len(numeric_cols) > 0:
-                                    st.markdown("**Summary Statistics:**")
-                                    summary_stats = data_df[numeric_cols].describe()
-                                    st.dataframe(summary_stats, use_container_width=True)
                     
                     # Display code in a proper expander for assistant messages
                     if msg.get("code") and msg["role"] == "assistant":

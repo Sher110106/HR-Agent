@@ -92,6 +92,10 @@ flowchart LR
 | 📊 **Pro Visualizations** | Publication-ready charts | Business presentations |
 | 🧠 **Transparent AI** | Visible reasoning process | Trust & understanding |
 | 🧪 **Dual-Output Plots** | Chart + source data table | Rich analysis & easy export |
+| 🗃️ **Caching** | Intelligent in-memory & persistent cache | Fast repeated queries |
+| 🩺 **Health Monitoring** | System, API, and resource checks | Reliability |
+| 📈 **Metrics** | Tracks API, code, and error events | Performance insights |
+| 🧩 **System Prompts** | Customizable LLM prompt templates | Adaptable agent behavior |
 
 ## 🎨 Enhanced Visualizations
 
@@ -196,12 +200,17 @@ apply_professional_styling(ax,
 ### Environment Variables
 ```bash
 NVIDIA_API_KEY=your_api_key_here
+STREAMLIT_SERVER_PORT=8501
+LOG_LEVEL=INFO
+LOG_FILE=data_analysis_agent.log
+LOG_MAX_BYTES=10485760
+LOG_BACKUP_COUNT=5
 ```
 
 ### Dependencies
 - **Core**: `streamlit`, `pandas`, `matplotlib`, `seaborn`
 - **AI**: `openai` (NVIDIA API client)
-- **Utils**: `chardet`, `watchdog`
+- **Utils**: `chardet`, `watchdog`, `psutil`
 
 ## 🚀 Deployment
 
@@ -222,7 +231,15 @@ data-analysis-agent/
 ├── streamlit_app.py           # Streamlit application entry
 ├── utils/
 │   ├── __init__.py            # Helper exports
-│   └── plot_helpers.py        # Visualization utilities
+│   ├── plot_helpers.py        # Visualization utilities
+│   ├── navigation.py          # Page management
+│   ├── system_prompts.py      # System prompt management
+│   ├── logging_config.py      # Logging setup
+│   ├── circuit_breaker.py     # Circuit breaker logic
+│   ├── retry_utils.py         # Retry helpers
+│   ├── cache.py               # Caching systems
+│   ├── health_monitor.py      # Health monitoring
+│   └── metrics.py             # Metrics collection
 ├── requirements.txt           # Dependencies
 └── README.md                  # Documentation
 ```
@@ -233,6 +250,7 @@ data-analysis-agent/
 - **Session Management**: Automatic logout
 - **Local Processing**: Data stays on your infrastructure
 - **Audit Logging**: Comprehensive activity tracking
+- **Secrets**: All secrets injected via environment variables
 
 ## 🎯 HR Use Cases
 
@@ -253,35 +271,22 @@ data-analysis-agent/
 
 ## 📈 Performance Benefits
 
-Based on [documentation best practices](https://folge.me/blog/7-best-practices-for-creating-clear-software-documentation):
-
 - **30% faster** query resolution
 - **40% reduction** in support needs  
 - **65% quicker** information retrieval
 - **Professional quality** visualizations
+- **Intelligent caching** for repeated queries
+- **Health monitoring** for reliability
+- **Metrics** for performance tracking
 
-## 🤝 Contributing
+## 🧩 Advanced Engineering Highlights
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/enhancement`)
-3. Commit changes (`git commit -m 'Add enhancement'`)
-4. Submit Pull Request
-
-## 📄 License
-
-Licensed under the Apache License, Version 2.0. See source files for details.
-
-## 🔗 Links
-
-- [NVIDIA Llama-3.1-Nemotron](https://build.nvidia.com/nvidia/llama-3_1-nemotron-ultra-253b-v1)
-- [Streamlit Documentation](https://docs.streamlit.io/)
-- [Data Visualization Best Practices](https://oyasalofa.medium.com/the-art-of-documentation-in-data-analysis-building-your-portfolio-with-precision-7138251acf77)
-
-## 🔄 Recent Enhancements (v0.3)
-
-- **Dual-Output Visualization System** – every plot now returns a tuple `(fig, data_df)` enabling instant data-table previews and one-click **PNG / CSV** export.
-- **Enhanced Error Recovery** – automatic retry mechanism fixes common `pandas` mistakes before they reach the user.
-- **Professional Plot Helpers** – shared helpers (`add_value_labels`, `format_axis_labels`, `apply_professional_styling`, …) guarantee publication-ready charts.
+- **Dual-Output Contract** – All plot queries return `(fig, data_df)` for instant download/export.
+- **Intelligent Caching** – In-memory and persistent cache for code, results, and analysis.
+- **Circuit Breaker & Retry** – Resilient API and code execution with fail-fast and recovery.
+- **System Prompt Management** – Customizable LLM prompt templates for agent behavior.
+- **Health Monitoring** – Background checks for system, API, and resource health.
+- **Metrics Collection** – Tracks API, code, and error events for performance and debugging.
 
 ```mermaid
 graph LR

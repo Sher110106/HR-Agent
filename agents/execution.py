@@ -75,13 +75,30 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         # Import helper functions for enhanced plotting
         try:
             from utils.plot_helpers import (
-                add_value_labels, format_axis_labels,
-                apply_professional_styling, get_professional_colors
+                format_axis_labels,
+                apply_professional_styling, get_professional_colors, safe_color_access, optimize_figure_size,
+                create_clean_bar_chart, create_clean_line_chart, create_clean_scatter_plot,
+                create_clean_histogram, create_clean_box_plot, create_clean_heatmap, 
+                create_clean_pie_chart, add_value_labels, smart_categorical_plot, handle_seaborn_warnings,
+                smart_annotate_points
             )
-            env["add_value_labels"] = add_value_labels
             env["format_axis_labels"] = format_axis_labels
             env["apply_professional_styling"] = apply_professional_styling 
             env["get_professional_colors"] = get_professional_colors
+            env["safe_color_access"] = safe_color_access
+            env["optimize_figure_size"] = optimize_figure_size
+            env["create_clean_bar_chart"] = create_clean_bar_chart
+            env["create_clean_line_chart"] = create_clean_line_chart
+            env["create_clean_scatter_plot"] = create_clean_scatter_plot
+            env["create_clean_histogram"] = create_clean_histogram
+            env["create_clean_box_plot"] = create_clean_box_plot
+            env["create_clean_heatmap"] = create_clean_heatmap
+            env["create_clean_pie_chart"] = create_clean_pie_chart
+            env["add_value_labels"] = add_value_labels
+            env["smart_categorical_plot"] = smart_categorical_plot
+            env["handle_seaborn_warnings"] = handle_seaborn_warnings
+            env["smart_annotate_points"] = smart_annotate_points
+            
             logger.info("🎨 Plot environment set up with matplotlib, seaborn, and helper functions")
         except ImportError as e:
             logger.warning(f"⚠️ Could not import plot helpers: {e}")

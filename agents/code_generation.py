@@ -76,12 +76,10 @@ Respond with only 'true' for any explicit or implicit visualization request. For
 def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "", memory_agent: ColumnMemoryAgent = None) -> str:
     """
     Generate a prompt for the LLM to write pandas+matplotlib code for a plot based on the query and columns.
-    
-    The generated code will return a tuple (fig, data_df) where:
-    - fig: matplotlib figure object with professional styling and value labels
-    - data_df: pandas DataFrame containing the aggregated data used to create the plot
-    
-    This enables dual output for enhanced analysis and data export capabilities.
+    The generated code must return a tuple (fig, data_df):
+      - fig: matplotlib figure object with professional styling
+      - data_df: pandas DataFrame containing the aggregated data used to create the plot
+    Value labels and text annotations are not allowed.
     """
     logger.info(f"📊 PlotCodeGeneratorTool: Generating plot prompt for columns: {cols}")
     
@@ -91,34 +89,26 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     
     for col in cols:
         dtype = str(df[col].dtype)
-        
-        # Check if we have AI-generated column description
         if memory_agent and memory_agent.has_descriptions():
             stored_description = memory_agent.get_column_description(col)
             if stored_description:
                 data_info.append(f"{col} ({dtype}): {stored_description[:200]}...")
-                # Check if description mentions date/time
                 if any(keyword in stored_description.lower() for keyword in ['date', 'time', 'temporal', 'timestamp']):
                     date_columns.append(col)
                 continue
-        
-        # Fallback to basic analysis if no stored description
-        # Check if this might be a date/time column
         is_likely_date = False
         if df[col].dtype == 'object':
-            # Look for date-like patterns in the first few non-null values
             sample_values = df[col].dropna().head(3).astype(str).tolist()
             for val in sample_values:
                 if any(pattern in val.lower() for pattern in ['am', 'pm', '/', '-', ':', 'time', 'date']):
                     is_likely_date = True
                     break
-        
         if is_likely_date:
             date_columns.append(col)
             sample_vals = df[col].dropna().head(3).tolist()
             data_info.append(f"{col} ({dtype}): DATE/TIME column with sample values: {sample_vals}")
         elif df[col].dtype == 'object' or df[col].nunique() < 10:
-            unique_vals = df[col].unique()[:5]  # First 5 unique values
+            unique_vals = df[col].unique()[:5]
             data_info.append(f"{col} ({dtype}): {list(unique_vals)}")
         else:
             data_info.append(f"{col} ({dtype}): numeric range {df[col].min()}-{df[col].max()}")
@@ -126,104 +116,54 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     data_context = "\n".join(data_info)
     logger.debug(f"Data context: {data_context[:300]}...")
     
-    # Special instructions for date handling
     date_instructions = ""
     if date_columns:
         logger.info(f"📅 Detected potential date columns: {date_columns}")
         date_instructions = f"""
-    
     IMPORTANT - Date/Time Handling:
     - Detected date/time columns: {', '.join(date_columns)}
-    - For date parsing, ALWAYS use: pd.to_datetime(df['column_name'], errors='coerce', infer_datetime_format=True)
-    - This handles various formats like "5/13/25 12:00 AM", "2025-05-13", etc.
-    - For seasonal analysis, extract month: df['Month'] = pd.to_datetime(df['date_col'], errors='coerce').dt.month
-    - For seasonal grouping: df['Season'] = df['Month'].map({{12: 'Winter', 1: 'Winter', 2: 'Winter', 3: 'Spring', 4: 'Spring', 5: 'Spring', 6: 'Summer', 7: 'Summer', 8: 'Summer', 9: 'Fall', 10: 'Fall', 11: 'Fall'}})
+    - For date parsing, use: pd.to_datetime(df['column_name'], errors='coerce')
     """
     
-    # Build prompt with optional conversation context
-    context_section = ""
-    if conversation_context:
-        context_section = f"""
-    Previous conversation context:
-    {conversation_context}
-    
-    """
-    
-    # Add note about enhanced column information if available
-    enhancement_note = ""
-    if memory_agent and memory_agent.has_descriptions():
-        enhancement_note = """
-    
-    📈 ENHANCED MODE: Detailed AI-generated column descriptions are available above. 
-    Use this rich context to create more sophisticated and contextually relevant visualizations.
-    Consider the business meaning, data quality insights, and suggested use cases for each column.
-    """
+    context_section = f"\nPrevious conversation context:\n{conversation_context}\n" if conversation_context else ""
+    enhancement_note = "\n\nAI-generated column descriptions are available above. Use this context for more relevant visualizations." if memory_agent and memory_agent.has_descriptions() else ""
     
     prompt = f"""
-    Given DataFrame `df` with columns and data types:
-    {data_context}
-    {context_section}{date_instructions}{enhancement_note}
-    Write Python code using pandas **and matplotlib** (as plt) to answer:
-    "{query}"
+Given DataFrame `df` with columns and data types:
+{data_context}
+{context_section}{date_instructions}{enhancement_note}
+Write Python code using pandas, matplotlib (as plt) and seaborn (as sns) to answer:
+"{query}"
 
-    CRITICAL NEW REQUIREMENTS - DUAL OUTPUT PLOTS
-    ============================================
-    Your code MUST return BOTH the plot figure AND the underlying data as a tuple: `result = (fig, data_df)`
+REQUIREMENTS
+- Return a tuple (fig, data_df) where:
+    – fig is a matplotlib Figure with **professional styling**
+    – data_df is the tidy DataFrame used to create the plot
+- Use MINIMAL value labels only when truly helpful (avoid clutter)
+- **DO NOT** use plt.table / ax.table
+- Use ONLY these helper utilities:
+    – apply_professional_styling(ax, title, xlabel, ylabel)
+    – format_axis_labels(ax, x_rotation=45)
+    – get_professional_colors()['colors']
+    – safe_color_access(colors, index) # Safe color access with cycling
+    – optimize_figure_size(ax)
+    – add_value_labels(ax, label_mode="minimal") # Use sparingly for key insights only
+    – handle_seaborn_warnings() # Call at start to suppress harmless seaborn warnings
     
-    1. **Create the figure**: `fig, ax = plt.subplots(figsize=(12,7))`
-    2. **Prepare plot data**: Create a DataFrame called `data_df` containing the aggregated/processed data used for the plot
-    3. **Build the visualization**: Use ax.bar(), ax.scatter(), ax.plot(), etc.
-    4. **Add automatic value labels**: Call helper functions to add value labels to every bar/point
-    5. **Format axes**: Apply proper axis formatting and rotation for readability
-    6. **Apply professional styling**: Use helper functions for consistent appearance
-    7. **Return tuple**: `result = (fig, data_df)` where data_df contains the plot's source data
-
-    Available Helper Functions
-    -------------------------
-    You have access to these pre-built helper functions (import them as needed):
-    - `add_value_labels(ax)` - Automatically adds value labels to bars and points
-    - `format_axis_labels(ax, x_rotation=45)` - Rotates and wraps long axis labels
-    - `apply_professional_styling(ax, title="", xlabel="", ylabel="")` - Applies consistent styling
-    - `get_professional_colors()['colors']` - Returns professional color palette
-    - `optimize_figure_size(ax)` - Adjusts figure size based on content
-
-    Mandatory Code Structure
-    -----------------------
-    ```python
-    # 1. Data preparation and aggregation
-    data_df = df.groupby('category')['value'].sum().reset_index()  # Example - adapt to your query
-    
-    # 2. Create figure
-    fig, ax = plt.subplots(figsize=(12, 7))
-    
-    # 3. Create the plot
-    colors = get_professional_colors()['colors']
-    ax.bar(data_df['category'], data_df['value'], color=colors[0])
-    
-    # 4. Add value labels (MANDATORY)
-    add_value_labels(ax)
-    
-    # 5. Format axes (MANDATORY)  
-    format_axis_labels(ax, x_rotation=45)
-    
-    # 6. Apply styling (MANDATORY)
-    apply_professional_styling(ax, title="Chart Title", xlabel="X Label", ylabel="Y Label")
-    
-    # 7. Return both figure and data (MANDATORY)
-    result = (fig, data_df)
-    ```
-
-    Rules & Available Tools
-    ----------------------
-    1. Use pandas, matplotlib.pyplot (as plt), and seaborn (as sns) - `pd`, `np`, `df`, `plt`, `sns` are all available in scope.
-    2. For date/time columns, prefer smart_date_parser(df, 'column_name') for robust parsing.
-    3. For categorical columns, convert to numeric: df['col'].map({{
-        'option1': 1, 'option2': 2
-    }}) if needed
-    4. Use the helper functions for professional appearance
-    5. Always include dual output: (fig, data_df)
-    6. Wrap code in a single ```python fence
-    """
+    CHART TYPE HELPERS (choose the most appropriate):
+    – create_clean_bar_chart(ax, data_df, x_col, y_col, hue_col=None, title="", xlabel="", ylabel="", legend_totals=True)
+    – create_clean_line_chart(ax, data_df, x_col, y_col, hue_col=None, title="", xlabel="", ylabel="", show_markers=True)
+    – create_clean_scatter_plot(ax, data_df, x_col, y_col, hue_col=None, size_col=None, title="", xlabel="", ylabel="", add_trendline=False)
+    – create_clean_histogram(ax, data_df, col, bins=30, title="", xlabel="", ylabel="Frequency", show_stats=True)
+    – create_clean_box_plot(ax, data_df, x_col, y_col, title="", xlabel="", ylabel="", show_outliers=True)
+    – create_clean_heatmap(ax, data_df, title="", cmap='RdYlBu_r', show_values=False)
+    – create_clean_pie_chart(ax, data_df, col, title="", show_percentages=True, explode_max=True)
+    – smart_categorical_plot(ax, data_df, x_col, y_col, plot_type="auto") # For categorical data with many points
+    – smart_annotate_points(ax, data_df, x_col, y_col, label_col, max_annotations=5) # Add smart annotations to scatter plots
+- Ensure the figure is aesthetically pleasing: grid, spines removed, legend with totals, tight layout
+- Assign the final tuple to `result`
+- Wrap code in a single ```python block with no extra text
+"""
     logger.debug(f"Generated plot prompt: {prompt[:200]}...")
     return prompt
 
@@ -281,7 +221,7 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     
     IMPORTANT - Date/Time Handling:
     - Detected date/time columns: {', '.join(date_columns)}
-    - For date parsing, ALWAYS use: pd.to_datetime(df['column_name'], errors='coerce', infer_datetime_format=True)
+    - For date parsing, ALWAYS use: pd.to_datetime(df['column_name'], errors='coerce')
     - This handles various formats like "5/13/25 12:00 AM", "2025-05-13", etc.
     - For seasonal analysis, extract month: df['Month'] = pd.to_datetime(df['date_col'], errors='coerce').dt.month
     - For seasonal grouping: df['Season'] = df['Month'].map({{12: 'Winter', 1: 'Winter', 2: 'Winter', 3: 'Spring', 4: 'Spring', 5: 'Spring', 6: 'Summer', 7: 'Summer', 8: 'Summer', 9: 'Fall', 10: 'Fall', 11: 'Fall'}})
@@ -322,7 +262,10 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     5. For groupby operations, handle missing values with .dropna() if needed.
     6. Always assign the final result to `result` variable.
     7. Ensure result is a clear, interpretable value (float, dict, or small DataFrame).
-    8. Wrap code in a single ```python fence with no explanations.
+    8. When using seaborn, only use 'palette' if 'hue' is specified. If you want to color by a single variable, assign it to 'hue' and set 'legend=False'.
+    9. When providing a palette, slice it to match the number of unique categories in the data.
+    10. When setting tick labels, always set the ticks first or use ax.tick_params for rotation instead of set_ticklabels.
+    11. Wrap code in a single ```python fence with no explanations.
 
     Example Patterns:
     - Correlation: result = df[['col1', 'col2']].corr().iloc[0, 1]
