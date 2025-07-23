@@ -33,19 +33,46 @@ def ReasoningCurator(query: str, result: Any) -> str:
         logger.info("🎯 Error result detected")
     
     elif isinstance(result, tuple) and len(result) == 2:
-        # New dual-output format: (fig, data_df)
-        fig, data_df = result
-        if isinstance(fig, (plt.Figure, plt.Axes)) and hasattr(data_df, 'to_string'):
-            result_type = "dual output (plot + data)"
-            result_context = f"""This is a dual-output result containing both a visualization and the underlying data.
+        # New dual-output format: (fig, data_df) or (fig, dict_of_dataframes)
+        fig, data_content = result
+        if isinstance(fig, (plt.Figure, plt.Axes)):
+            if hasattr(data_content, 'to_string'):  # DataFrame
+                result_type = "dual output (plot + data)"
+                result_context = f"""This is a dual-output result containing both a visualization and the underlying data.
 
 PLOT: A {type(fig).__name__} showing the visualization requested by the user.
 
 UNDERLYING DATA:
-{data_df.to_string(max_rows=20, max_cols=10)}
+{data_content.to_string(max_rows=20, max_cols=10)}
 
 You have access to both the visual representation AND the specific numerical values. Use both in your analysis."""
-            logger.info(f"🎯 Dual-output result detected: plot + data with {len(data_df)} rows")
+                logger.info(f"🎯 Dual-output result detected: plot + data with {len(data_content)} rows")
+            elif isinstance(data_content, dict):
+                # Dictionary of DataFrames
+                result_type = "dual output (plot + multiple datasets)"
+                data_summary = []
+                data_details = []
+                for key, df in data_content.items():
+                    if hasattr(df, 'to_string'):
+                        data_summary.append(f"{key}: {len(df)} rows")
+                        data_details.append(f"\n{key.upper()} DATASET:\n{df.to_string(max_rows=20, max_cols=10)}")
+                
+                result_context = f"""This is a dual-output result containing both a visualization and multiple underlying datasets.
+
+PLOT: A {type(fig).__name__} showing the visualization requested by the user.
+
+UNDERLYING DATASETS SUMMARY:
+{chr(10).join(data_summary)}
+
+DETAILED DATASET CONTENTS:
+{chr(10).join(data_details)}
+
+You have access to both the visual representation AND the specific numerical values from multiple datasets. Use both in your analysis."""
+                logger.info(f"🎯 Dual-output result detected: plot + multiple datasets")
+            else:
+                result_type = "unknown tuple"
+                result_context = f"Tuple result with types: {type(result[0])}, {type(result[1])}"
+                logger.warning("🎯 Unexpected tuple format detected")
         else:
             result_type = "unknown tuple"
             result_context = f"Tuple result with types: {type(result[0])}, {type(result[1])}"
@@ -116,11 +143,15 @@ def ReasoningAgent(query: str, result: Any):
     Note: This function has UI dependencies (streamlit) that should be refactored for better separation of concerns.
     """
     logger.info(f"🧠 ReasoningAgent: Starting reasoning for query: '{query}'")
+    logger.info(f"🧠 Result type: {type(result)}")
+    logger.info(f"🧠 Result content preview: {str(result)[:200]}...")
     
     # Get system prompt context
     system_prompt_agent = SystemPromptMemoryAgent()
     
     prompt = ReasoningCurator(query, result)
+    logger.info(f"🧠 Generated prompt length: {len(prompt)} characters")
+    
     is_error = isinstance(result, str) and result.startswith("Error executing code")
     is_plot = isinstance(result, (plt.Figure, plt.Axes))
 
@@ -169,6 +200,8 @@ Begin by streaming your detailed analytical process within `<think>...</think>` 
     
     # Apply system prompt if active
     system_prompt = system_prompt_agent.apply_system_prompt(base_system_prompt)
+    logger.info(f"📤 System prompt length: {len(system_prompt)} characters")
+    logger.info(f"📤 User prompt length: {len(prompt)} characters")
     
     # Streaming LLM call
     messages = [

@@ -146,9 +146,24 @@ REQUIREMENTS
     – format_axis_labels(ax, x_rotation=45)
     – get_professional_colors()['colors']
     – safe_color_access(colors, index) # Safe color access with cycling
+    – create_category_palette(categories, palette_name='primary') # For seaborn category-specific palettes
     – optimize_figure_size(ax)
     – add_value_labels(ax, label_mode="minimal") # Use sparingly for key insights only
     – handle_seaborn_warnings() # Call at start to suppress harmless seaborn warnings
+    
+    SEABORN PALETTE GUIDANCE:
+    - For category-specific colors: palette = create_category_palette(df['category_col'].unique())
+    - For general seaborn plots: palette = get_professional_colors()['colors'][:n_categories]
+    - Always slice colors to match the number of categories to avoid warnings
+    - When using seaborn with palette, assign the categorical column to 'hue' and set legend=False to avoid deprecation warnings
+    - Example: sns.barplot(data=df, x='x_col', y='y_col', hue='category_col', palette=palette, legend=False)
+    
+    PANDAS BEST PRACTICES:
+    - Use observed=True in groupby operations: df.groupby('col', observed=True)
+    - Handle missing values with .dropna() before operations
+    - Use .copy() to avoid SettingWithCopyWarning
+    - For concatenation with different column structures, use pd.concat([df1, df2], ignore_index=True, sort=False)
+    - Always assign your final result to the variable 'result' - this is critical!
     
     CHART TYPE HELPERS (choose the most appropriate):
     – create_clean_bar_chart(ax, data_df, x_col, y_col, hue_col=None, title="", xlabel="", ylabel="", legend_totals=True)
@@ -259,13 +274,15 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     2. For date/time columns, prefer smart_date_parser(df, 'column_name') for robust parsing.
     3. For categorical columns (like Yes/No), convert to numeric first: df['col'].map({{'Yes': 1, 'No': 0}}).
     4. For correlation analysis, use df[['col1', 'col2']].corr().iloc[0, 1] for cleaner results.
-    5. For groupby operations, handle missing values with .dropna() if needed.
-    6. Always assign the final result to `result` variable.
+    5. For groupby operations, use observed=True: df.groupby('col', observed=True) and handle missing values with .dropna() if needed.
+    6. **CRITICAL**: Always assign the final result to `result` variable - this is required!
     7. Ensure result is a clear, interpretable value (float, dict, or small DataFrame).
-    8. When using seaborn, only use 'palette' if 'hue' is specified. If you want to color by a single variable, assign it to 'hue' and set 'legend=False'.
-    9. When providing a palette, slice it to match the number of unique categories in the data.
-    10. When setting tick labels, always set the ticks first or use ax.tick_params for rotation instead of set_ticklabels.
-    11. Wrap code in a single ```python fence with no explanations.
+    8. For concatenation with different column structures, use pd.concat([df1, df2], ignore_index=True, sort=False)
+    9. When using seaborn, only use 'palette' if 'hue' is specified. If you want to color by a single variable, assign it to 'hue' and set 'legend=False'.
+    10. When providing a palette, slice it to match the number of unique categories in the data.
+    11. When setting tick labels, always set the ticks first or use ax.tick_params for rotation instead of set_ticklabels.
+    12. Use .copy() to avoid SettingWithCopyWarning when creating filtered DataFrames.
+    13. Wrap code in a single ```python fence with no explanations.
 
     Example Patterns:
     - Correlation: result = df[['col1', 'col2']].corr().iloc[0, 1]

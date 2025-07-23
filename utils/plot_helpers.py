@@ -230,6 +230,25 @@ def safe_color_access(colors, index):
     return colors[index % len(colors)]
 
 
+def create_category_palette(categories, palette_name='primary'):
+    """
+    Create a seaborn-compatible palette dictionary for specific categories.
+    
+    Args:
+        categories: List of category names (e.g., ['Active', 'Inactive'])
+        palette_name: Name of the color palette ('primary', 'secondary', 'categorical')
+    Returns:
+        dict: Dictionary mapping category names to colors
+    """
+    colors = get_professional_colors(palette_name)['colors']
+    palette = {}
+    
+    for i, category in enumerate(categories):
+        palette[category] = colors[i % len(colors)]
+    
+    return palette
+
+
 def optimize_figure_size(ax: plt.Axes) -> None:
     """
     Adjust the figure size based on the number and length of tick labels.

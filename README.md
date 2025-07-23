@@ -1,6 +1,6 @@
 # Business Analysis HR Agent
 
-> **Secure, AI-powered data analysis for HR professionals** - Transform your HR data into actionable insights using natural language queries powered by NVIDIA's advanced reasoning models.
+> **Secure, AI-powered data analysis for HR professionals** - Transform your HR data into actionable insights using natural language queries powered by NVIDIA's advanced reasoning models. Now with **Excel file support** and enhanced reasoning capabilities.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)](https://streamlit.io/)
@@ -25,6 +25,10 @@ streamlit run streamlit_app.py
 - Username: `Plaksha-HR`
 - Password: `AgentHR1`
 
+**Available Analysis Modes:**
+- 📊 **CSV Analysis** - Upload and analyze CSV files
+- 📈 **Excel Analysis** - Multi-sheet Excel file support with intelligent sheet selection
+
 ## 📖 Documentation
 
 - **Technical Manual** – deep dive into architecture, setup & APIs: [Technical.md](Technical.md)
@@ -34,25 +38,33 @@ streamlit run streamlit_app.py
 
 ```mermaid
 graph TB
-    A[User Login] --> B[Data Upload]
-    B --> C[Natural Language Query]
-    C --> D{Query Understanding}
-    D -->|Visualization| E[Plot Generator]
-    D -->|Analysis| F[Code Generator]
-    E --> G[Execution Engine]
-    F --> G
-    G --> H[Results + Reasoning]
-    H --> I[Professional Visualizations]
+    A[User Login] --> B{Data Type}
+    B -->|CSV| C[CSV Upload]
+    B -->|Excel| D[Excel Upload]
+    C --> E[Natural Language Query]
+    D --> F[Sheet Selection Agent]
+    F --> E
+    E --> G{Query Understanding}
+    G -->|Visualization| H[Plot Generator]
+    G -->|Analysis| I[Code Generator]
+    H --> J[Execution Engine]
+    I --> J
+    J --> K[Results + Reasoning]
+    K --> L[Professional Visualizations]
     
     subgraph "AI Agents"
-        J[Memory Agent]
-        K[Insight Agent]
-        L[Reasoning Agent]
+        M[Memory Agent]
+        N[Insight Agent]
+        O[Reasoning Agent]
+        P[Sheet Selection Agent]
+        Q[Column Indexer Agent]
     end
     
-    D --> J
-    G --> K
-    H --> L
+    G --> M
+    J --> N
+    K --> O
+    D --> P
+    D --> Q
 ```
 
 ## 🧠 Agent Workflow
@@ -92,10 +104,40 @@ flowchart LR
 | 📊 **Pro Visualizations** | Publication-ready charts | Business presentations |
 | 🧠 **Transparent AI** | Visible reasoning process | Trust & understanding |
 | 🧪 **Dual-Output Plots** | Chart + source data table | Rich analysis & easy export |
+| 📈 **Excel Support** | Multi-sheet Excel file analysis | Complex data handling |
+| 🎯 **Smart Sheet Selection** | AI-powered sheet identification | Intelligent data discovery |
 | 🗃️ **Caching** | Intelligent in-memory & persistent cache | Fast repeated queries |
 | 🩺 **Health Monitoring** | System, API, and resource checks | Reliability |
 | 📈 **Metrics** | Tracks API, code, and error events | Performance insights |
 | 🧩 **System Prompts** | Customizable LLM prompt templates | Adaptable agent behavior |
+
+## 📈 Excel Analysis Capabilities
+
+### Multi-Sheet Excel Support
+- **Intelligent Sheet Selection** - AI automatically identifies relevant sheets based on your query
+- **Cross-Sheet Analysis** - Compare data across multiple sheets with union/join strategies
+- **Column Indexing** - Smart column discovery and semantic understanding
+- **Sheet Catalog** - Complete overview of all sheets and their contents
+- **Semantic Layer** - AI-generated column descriptions for better analysis
+
+### Excel-Specific Features
+- **Sheet Plan Generation** - AI creates optimal analysis plans for complex queries
+- **Dual-Output Results** - Charts with underlying data from multiple datasets
+- **Professional Reasoning** - Comprehensive business insights with actual data values
+- **Error Handling** - Robust processing with automatic retry mechanisms
+- **Performance Optimization** - Efficient handling of large Excel files
+
+### Example Excel Queries
+```
+"Compare active employees and inactive employees in terms of numbers, salary, and demographics"
+→ Multi-dataset analysis with comprehensive insights
+
+"Show employee distribution across all departments"
+→ Cross-sheet aggregation with professional visualization
+
+"Analyze salary trends by location and department"
+→ Complex multi-dimensional analysis
+```
 
 ## 🎨 Enhanced Visualizations
 
@@ -179,7 +221,24 @@ graph LR
 
 "Plot hiring trends over quarters"
 → Time series with markers
+
+"Compare active and inactive employees across all metrics"
+→ Multi-dataset analysis with comprehensive insights
 ```
+
+## 🔧 Recent Improvements
+
+### Bug Fixes & Enhancements
+- **✅ Fixed Reasoning Agent** - Resolved UnboundLocalError that was preventing proper analysis output
+- **✅ Enhanced Dual-Output Handling** - Improved processing of complex multi-dataset results
+- **✅ Better Error Handling** - Added comprehensive error handling around reasoning agent calls
+- **✅ Enhanced Logging** - Improved debugging capabilities with detailed execution tracking
+- **✅ Excel Analysis Stability** - Fixed issues with sheet selection and data processing
+
+### Performance Improvements
+- **🚀 Faster Query Processing** - Optimized reasoning agent execution
+- **🔍 Better Data Handling** - Enhanced support for complex Excel structures
+- **📈 Improved Reliability** - More robust error recovery and fallback mechanisms
 
 ### Generated Code Quality
 ```python
@@ -229,6 +288,19 @@ streamlit run streamlit_app.py
 ```
 data-analysis-agent/
 ├── streamlit_app.py           # Streamlit application entry
+├── pages/
+│   ├── data_analysis.py       # CSV analysis page
+│   ├── excel_analysis.py      # Excel analysis page
+│   ├── monitoring.py          # System monitoring
+│   └── system_prompt_manager.py # Prompt management
+├── agents/
+│   ├── data_analysis.py       # CSV analysis agents
+│   ├── excel_agents.py        # Excel-specific agents
+│   ├── excel_code_generation.py # Excel code generation
+│   ├── excel_execution.py     # Excel execution engine
+│   ├── sheet_selection.py     # Intelligent sheet selection
+│   ├── reasoning.py           # Reasoning and insights
+│   └── memory.py              # Memory and context management
 ├── utils/
 │   ├── __init__.py            # Helper exports
 │   ├── plot_helpers.py        # Visualization utilities
@@ -239,7 +311,8 @@ data-analysis-agent/
 │   ├── retry_utils.py         # Retry helpers
 │   ├── cache.py               # Caching systems
 │   ├── health_monitor.py      # Health monitoring
-│   └── metrics.py             # Metrics collection
+│   ├── metrics.py             # Metrics collection
+│   └── excel_query_engine.py  # Excel query processing
 ├── requirements.txt           # Dependencies
 └── README.md                  # Documentation
 ```
@@ -260,6 +333,9 @@ data-analysis-agent/
 | **Performance Analysis** | "Plot performance vs tenure" | Correlation scatter plot |
 | **Compensation Study** | "Analyze salary equity by role" | Box plots with statistics |
 | **Turnover Insights** | "Visualize attrition trends" | Time series analysis |
+| **Multi-Sheet Analysis** | "Compare active vs inactive employees" | Comprehensive multi-dataset analysis |
+| **Cross-Department Analysis** | "Analyze employee distribution across all departments" | Cross-sheet aggregation |
+| **Complex Demographics** | "Show gender and age distribution by status" | Multi-dimensional analysis |
 
 ## 🚀 Model Capabilities
 

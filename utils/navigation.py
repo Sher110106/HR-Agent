@@ -43,13 +43,21 @@ class NavigationRegistry:
                 description="Upload and analyze data with AI assistance",
                 order=1
             ),
+            "excel_analysis": PageConfig(
+                title="📈 Excel Analysis",
+                icon="📈",
+                module_path="pages.excel_analysis",
+                function_name="excel_analysis_page",
+                description="Upload and analyze multi-sheet Excel files with AI assistance",
+                order=2
+            ),
             "system_prompts": PageConfig(
                 title="🎯 System Prompts",
                 icon="🎯",
                 module_path="pages.system_prompt_manager",
                 function_name="system_prompt_manager_page",
                 description="Create and manage custom AI system prompts",
-                order=2
+                order=3
             ),
             "monitoring": PageConfig(
                 title="📈 Monitoring",
@@ -57,7 +65,7 @@ class NavigationRegistry:
                 module_path="pages.monitoring",
                 function_name="monitoring_dashboard",
                 description="Application health and performance monitoring",
-                order=3
+                order=4
             )
         }
         

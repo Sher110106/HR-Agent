@@ -24,6 +24,22 @@ from .data_analysis import (
     smart_date_parser,
     extract_first_code_block,
 )
+from .excel_agents import (
+    SheetCatalogAgent,
+    ColumnIndexerAgent,
+    ColumnRef,
+    SheetPlan,
+)
+from .sheet_selection import (
+    SheetSelectionAgent,
+    DisambiguationQuestion,
+)
+from .excel_code_generation import (
+    ExcelCodeGenerationAgent,
+)
+from .excel_execution import (
+    ExcelExecutionAgent,
+)
 
 __all__ = [
     "ColumnMemoryAgent",
@@ -44,4 +60,12 @@ __all__ = [
     "AnalyzeAllColumnsAgent",
     "smart_date_parser",
     "extract_first_code_block",
+    "SheetCatalogAgent",
+    "ColumnIndexerAgent",
+    "ColumnRef",
+    "SheetPlan",
+    "SheetSelectionAgent",
+    "DisambiguationQuestion",
+    "ExcelCodeGenerationAgent",
+    "ExcelExecutionAgent",
 ] 
