@@ -22,6 +22,12 @@ from .plot_helpers import (
     smart_annotate_points
 )
 
+from .docx_utils import (
+    text_to_docx,
+    dataframe_to_docx_table,
+    analysis_to_docx
+)
+
 __all__ = [
     'format_axis_labels',
     'apply_professional_styling', 
@@ -39,5 +45,8 @@ __all__ = [
     'add_value_labels',
     'smart_categorical_plot',
     'handle_seaborn_warnings',
-    'smart_annotate_points'
+    'smart_annotate_points',
+    'text_to_docx',
+    'dataframe_to_docx_table',
+    'analysis_to_docx'
 ]

@@ -92,6 +92,9 @@ Use the buttons below the chart:
 * **"Download PNG"** – high-resolution image.
 * **"Download CSV"** – underlying data table.
 * **"Download TXT"** – business explanation.
+* **"Download DOCX"** – formatted Word document with analysis text and data tables.
+
+> **New Feature:** All text and data downloads now include DOCX format options for professional document creation.
 
 ## Session Management
 - Sessions auto-expire after 30 minutes of inactivity for security.
@@ -122,7 +125,7 @@ Use the buttons below the chart:
 **A:** The agent will display a friendly error message and suggest fixes. Most common issues are auto-retried or explained.
 
 **Q:** *How do I download my results?*  
-**A:** Use the download buttons below each chart for PNG, CSV, and TXT exports.
+**A:** Use the download buttons below each chart for PNG, CSV, TXT, and DOCX exports. DOCX files are formatted Word documents perfect for reports and presentations.
 
 **Q:** *How is my session secured?*  
 **A:** Sessions are password-protected and auto-expire after inactivity.

@@ -16,7 +16,7 @@ import seaborn as sns
 
 from agents.excel_agents import SheetPlan, ColumnIndexerAgent
 from agents.data_analysis import smart_date_parser
-from utils.excel_error_handling import ExcelErrorHandler
+from utils.excel_error_handling import ExcelErrorHandler, ExcelErrorType
 from utils.excel_performance import PerformanceMonitor, performance_decorator
 
 logger = logging.getLogger(__name__)
@@ -41,10 +41,13 @@ class ExcelExecutionAgent:
             "smart_date_parser": smart_date_parser
         }
         
-        # Add all DataFrames from the sheet plan
+        # Add all DataFrames from the sheet plan with categorical handling
         for sheet_name in sheet_plan.primary_sheets:
             if sheet_name in self.sheet_catalog:
-                env[sheet_name] = self.sheet_catalog[sheet_name].copy()
+                # Create a copy and handle categorical columns
+                df = self.sheet_catalog[sheet_name].copy()
+                df = self._prepare_dataframe_for_execution(df, sheet_name)
+                env[sheet_name] = df
                 logger.info(f"📊 Added DataFrame '{sheet_name}' to environment")
         
         # Add plotting libraries if needed
@@ -89,6 +92,24 @@ class ExcelExecutionAgent:
         plt.rcParams["figure.dpi"] = 100
         
         return env
+    
+    def _prepare_dataframe_for_execution(self, df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
+        """Prepare DataFrame for execution by handling categorical columns."""
+        df_prepared = df.copy()
+        
+        # Handle categorical columns that might cause issues
+        categorical_columns = []
+        for col in df_prepared.columns:
+            if df_prepared[col].dtype.name == 'category':
+                categorical_columns.append(col)
+                # Convert categorical to string to avoid issues
+                df_prepared[col] = df_prepared[col].astype(str)
+                logger.info(f"🔄 Converted categorical column '{col}' to string in '{sheet_name}'")
+        
+        if categorical_columns:
+            logger.info(f"📊 Prepared {len(categorical_columns)} categorical columns in '{sheet_name}': {categorical_columns}")
+        
+        return df_prepared
     
     @performance_decorator
     def execute_code(self, code: str, sheet_plan: SheetPlan) -> Tuple[Any, str]:
@@ -178,82 +199,143 @@ class ExcelExecutionAgent:
             logger.error(f"❌ Execution failed: {error_msg}")
             logger.debug(f"📋 Full traceback:\n{full_traceback}")
             
-            # Record error in performance monitor
-            self.performance_monitor.record_error(exc)
+            # Handle specific error types
+            error_str = str(exc).lower()
             
-            # Provide more specific error guidance
-            if "not defined" in str(exc):
+            # Handle categorical errors
+            if "categorical" in error_str and "new category" in error_str:
+                # Extract column name from error message
+                column_name = self._extract_column_name_from_error(str(exc))
+                sheet_name = sheet_plan.primary_sheets[0] if sheet_plan.primary_sheets else "unknown"
+                
+                categorical_error = self.error_handler.handle_categorical_error(exc, column_name, sheet_name)
+                self.error_handler.log_error(categorical_error)
+                
+                error_msg = f"Categorical data issue: {categorical_error.message}\n\nSuggestion: {categorical_error.recovery_suggestion}"
+                
+                # Try automatic recovery
+                recovered_result = self._attempt_categorical_recovery(code, sheet_plan, column_name)
+                if recovered_result is not None:
+                    logger.info("✅ Automatic categorical recovery successful")
+                    return recovered_result, None
+            
+            # Handle other specific errors
+            elif "not defined" in error_str:
                 available_vars = list(env.keys())
                 error_msg += f"\n💡 Tip: Available variables are: {available_vars}"
-            elif "KeyError" in str(exc):
+            elif "KeyError" in error_str:
                 # Show available columns for the DataFrames
                 available_columns = {}
                 for sheet_name in sheet_plan.primary_sheets:
                     if sheet_name in self.sheet_catalog:
                         available_columns[sheet_name] = list(self.sheet_catalog[sheet_name].columns)
                 error_msg += f"\n💡 Tip: Available columns are: {available_columns}"
-            elif "has no attribute" in str(exc) and any(method in str(exc) for method in ['idxmax', 'idxmin', 'nlargest', 'nsmallest']):
+            elif "has no attribute" in error_str and any(method in error_str for method in ['idxmax', 'idxmin', 'nlargest', 'nsmallest']):
                 error_msg += f"\n💡 Tip: Method chaining error detected. For top N values, use: series.nlargest(n).index, then df.loc[indices]"
-            elif "SettingWithCopyWarning" in str(exc):
+            elif "SettingWithCopyWarning" in error_str:
                 error_msg += f"\n💡 Tip: Use .copy() when creating DataFrame subsets or .loc[] for safe assignments"
-            elif "'int' object has no attribute" in str(exc):
+            elif "'int' object has no attribute" in error_str:
                 error_msg += f"\n💡 Tip: Check your method chaining - you may be calling a method on an integer instead of a pandas object"
-            elif "merge" in str(exc).lower():
-                error_msg += f"\n💡 Tip: Check that the join keys exist in both DataFrames and have compatible data types"
-            elif "concat" in str(exc).lower():
-                error_msg += f"\n💡 Tip: Check that the DataFrames have compatible column structures for concatenation"
+            
+            # Record error in performance monitor
+            self.performance_monitor.record_error(exc)
             
             return None, error_msg
     
-    def validate_execution_environment(self, sheet_plan: SheetPlan) -> Tuple[bool, List[str]]:
-        """Validate that the execution environment can be created successfully."""
-        errors = []
+    def _extract_column_name_from_error(self, error_message: str) -> str:
+        """Extract column name from categorical error message."""
+        # Common patterns in categorical error messages
+        import re
         
-        # Check if all required sheets exist
+        # Pattern for "Cannot setitem on a Categorical with a new category (Unknown), set the categories first"
+        pattern = r"Cannot setitem on a Categorical with a new category \((\w+)\)"
+        match = re.search(pattern, error_message)
+        if match:
+            return match.group(1)
+        
+        # Try to extract from other patterns
+        patterns = [
+            r"column '(\w+)'",
+            r"in column '(\w+)'",
+            r"for column '(\w+)'"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, error_message)
+            if match:
+                return match.group(1)
+        
+        return "unknown_column"
+    
+    def _attempt_categorical_recovery(self, code: str, sheet_plan: SheetPlan, column_name: str) -> Optional[Any]:
+        """Attempt to recover from categorical errors by modifying the code."""
+        try:
+            logger.info(f"🔄 Attempting categorical recovery for column '{column_name}'")
+            
+            # Create a modified version of the code that handles categorical columns
+            modified_code = self._modify_code_for_categorical_recovery(code, column_name)
+            
+            if modified_code != code:
+                logger.info("🔄 Using modified code for categorical recovery")
+                
+                # Execute the modified code
+                env = self.create_execution_environment(sheet_plan)
+                exec(modified_code, env, env)
+                result = env.get("result", None)
+                
+                if result is not None:
+                    logger.info("✅ Categorical recovery successful")
+                    return result
+            
+        except Exception as recovery_error:
+            logger.warning(f"⚠️ Categorical recovery failed: {recovery_error}")
+        
+        return None
+    
+    def _modify_code_for_categorical_recovery(self, code: str, column_name: str) -> str:
+        """Modify code to handle categorical columns properly."""
+        # Add categorical handling before the main code
+        categorical_handling = f"""
+# Handle categorical columns to prevent issues
+for df_name in ['Active_Employees', 'Inactive_Employees']:
+    if df_name in locals():
+        df = locals()[df_name]
+        for col in df.columns:
+            if df[col].dtype.name == 'category':
+                df[col] = df[col].astype(str)
+                print(f"Converted categorical column {{col}} to string in {{df_name}}")
+
+"""
+        
+        return categorical_handling + code
+    
+    def validate_execution_environment(self, sheet_plan: SheetPlan) -> Tuple[bool, List[str]]:
+        """Validate that the execution environment is properly set up."""
+        validation_errors = []
+        
+        # Check if all required DataFrames are available
         for sheet_name in sheet_plan.primary_sheets:
             if sheet_name not in self.sheet_catalog:
-                errors.append(f"Required sheet '{sheet_name}' not found in catalog")
+                validation_errors.append(f"Required DataFrame '{sheet_name}' not found in sheet catalog")
         
-        # Check if sheets have data
+        # Check for categorical columns that might cause issues
         for sheet_name in sheet_plan.primary_sheets:
             if sheet_name in self.sheet_catalog:
                 df = self.sheet_catalog[sheet_name]
-                if df.empty:
-                    errors.append(f"Sheet '{sheet_name}' is empty")
+                categorical_columns = [col for col in df.columns if df[col].dtype.name == 'category']
+                if categorical_columns:
+                    validation_errors.append(f"Found categorical columns in '{sheet_name}': {categorical_columns}")
         
-        # Check join keys if using join strategy
-        if sheet_plan.join_strategy == 'join' and sheet_plan.join_keys:
-            for key in sheet_plan.join_keys:
-                refs = self.column_indexer_agent.get_column_refs(key)
-                if not refs:
-                    errors.append(f"Join key '{key}' not found in any sheet")
-                elif len(refs) < 2:
-                    errors.append(f"Join key '{key}' only found in {len(refs)} sheet(s), need at least 2")
-        
-        is_valid = len(errors) == 0
-        return is_valid, errors
+        return len(validation_errors) == 0, validation_errors
     
     def get_execution_summary(self, sheet_plan: SheetPlan) -> Dict[str, Any]:
-        """Get a summary of the execution environment."""
-        summary = {
-            'sheets': [],
-            'total_rows': 0,
-            'total_columns': 0,
-            'join_strategy': sheet_plan.join_strategy,
-            'join_keys': sheet_plan.join_keys
-        }
+        """Get summary of execution environment and performance."""
+        validation_passed, validation_errors = self.validate_execution_environment(sheet_plan)
         
-        for sheet_name in sheet_plan.primary_sheets:
-            if sheet_name in self.sheet_catalog:
-                df = self.sheet_catalog[sheet_name]
-                sheet_info = {
-                    'name': sheet_name,
-                    'rows': len(df),
-                    'columns': len(df.columns),
-                    'column_names': list(df.columns)
-                }
-                summary['sheets'].append(sheet_info)
-                summary['total_rows'] += len(df)
-                summary['total_columns'] += len(df.columns)
-        
-        return summary 
+        return {
+            "validation_passed": validation_passed,
+            "validation_errors": validation_errors,
+            "sheets_loaded": len(sheet_plan.primary_sheets),
+            "total_rows": sum(len(self.sheet_catalog[sheet]) for sheet in sheet_plan.primary_sheets if sheet in self.sheet_catalog),
+            "performance_metrics": self.performance_monitor.get_summary()
+        } 

@@ -270,13 +270,29 @@ def data_analysis_page():
                             clean_text = re.sub(r'\n+', '\n', clean_text).strip()
                             
                             if clean_text:
-                                st.download_button(
-                                    label="📄 Download Text",
-                                    data=clean_text,
-                                    file_name=f"analysis_response_{i+1}.txt",
-                                    mime="text/plain",
-                                    use_container_width=True
-                                )
+                                # Create two columns for text download options
+                                txt_col, docx_col = st.columns(2)
+                                
+                                with txt_col:
+                                    st.download_button(
+                                        label="📄 TXT",
+                                        data=clean_text,
+                                        file_name=f"analysis_response_{i+1}.txt",
+                                        mime="text/plain",
+                                        use_container_width=True
+                                    )
+                                
+                                with docx_col:
+                                    # Convert to DOCX
+                                    from utils.docx_utils import text_to_docx
+                                    docx_data = text_to_docx(clean_text, title=f"Analysis Response {i+1}")
+                                    st.download_button(
+                                        label="📝 DOCX",
+                                        data=docx_data,
+                                        file_name=f"analysis_response_{i+1}.docx",
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                        use_container_width=True
+                                    )
                         
                         # Download CSV data if available (dual-output only)
                         if has_data and col4:
@@ -285,18 +301,34 @@ def data_analysis_page():
                                 if 0 <= data_idx < len(st.session_state.get("plot_data", [])):
                                     data_df = st.session_state.plot_data[data_idx]
                                     
-                                    # Convert DataFrame to CSV
-                                    csv_buffer = io.StringIO()
-                                    data_df.to_csv(csv_buffer, index=False)
-                                    csv_data = csv_buffer.getvalue()
+                                    # Create two columns for data download options
+                                    csv_col, docx_col = st.columns(2)
                                     
-                                    st.download_button(
-                                        label="📊 Download Data (CSV)",
-                                        data=csv_data,
-                                        file_name=f"plot_data_{i+1}.csv",
-                                        mime="text/csv",
-                                        use_container_width=True
-                                    )
+                                    with csv_col:
+                                        # Convert DataFrame to CSV
+                                        csv_buffer = io.StringIO()
+                                        data_df.to_csv(csv_buffer, index=False)
+                                        csv_data = csv_buffer.getvalue()
+                                        
+                                        st.download_button(
+                                            label="📊 CSV",
+                                            data=csv_data,
+                                            file_name=f"plot_data_{i+1}.csv",
+                                            mime="text/csv",
+                                            use_container_width=True
+                                        )
+                                    
+                                    with docx_col:
+                                        # Convert DataFrame to DOCX table
+                                        from utils.docx_utils import dataframe_to_docx_table
+                                        docx_data = dataframe_to_docx_table(data_df, title=f"Plot Data {i+1}")
+                                        st.download_button(
+                                            label="📝 DOCX",
+                                            data=docx_data,
+                                            file_name=f"plot_data_{i+1}.docx",
+                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                            use_container_width=True
+                                        )
                         
                         # Download plot if available
                         plot_col = col4 if has_data else col3

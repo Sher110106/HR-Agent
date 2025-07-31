@@ -79,58 +79,8 @@ def render_system_prompt_sidebar():
 
 def render_sheet_catalog(sheet_catalog_agent: SheetCatalogAgent):
     """Render the sheet catalog information."""
-    st.subheader("📋 Sheet Catalog")
-    
-    sheet_info = sheet_catalog_agent.get_sheet_info()
-    
-    # Create tabs for different views
-    tab1, tab2 = st.tabs(["📊 Summary", "🔍 Details"])
-    
-    with tab1:
-        # Summary table
-        summary_data = []
-        for sanitized_name, info in sheet_info.items():
-            summary_data.append({
-                "Sheet Name": info['original_name'],
-                "Variable Name": sanitized_name,
-                "Rows": info['rows'],
-                "Columns": info['columns'],
-                "Memory (MB)": f"{info['memory_usage'] / 1024 / 1024:.2f}"
-            })
-        
-        if summary_data:
-            summary_df = pd.DataFrame(summary_data)
-            st.dataframe(summary_df, use_container_width=True)
-        else:
-            st.info("No sheets found in the Excel file.")
-    
-    with tab2:
-        # Detailed view with expandable sections for each sheet
-        for sanitized_name, info in sheet_info.items():
-            with st.expander(f"📋 {info['original_name']} ({sanitized_name})", expanded=False):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown(f"**Rows:** {info['rows']:,}")
-                    st.markdown(f"**Columns:** {info['columns']}")
-                    st.markdown(f"**Memory:** {info['memory_usage'] / 1024 / 1024:.2f} MB")
-                
-                with col2:
-                    # Show column names
-                    st.markdown("**Columns:**")
-                    for col in info['column_names'][:10]:  # Show first 10
-                        st.markdown(f"- {col}")
-                    if len(info['column_names']) > 10:
-                        st.markdown(f"- ... and {len(info['column_names']) - 10} more")
-                
-                # Show data types
-                st.markdown("**Data Types:**")
-                dtype_df = pd.DataFrame([
-                    {"Column": col, "Type": str(dtype)} 
-                    for col, dtype in info['data_types'].items()
-                ])
-                # Convert to string to avoid PyArrow issues
-                st.dataframe(dtype_df.astype(str), use_container_width=True)
+    # Entire function body removed to eliminate summary and details sections
+    pass
 
 
 def render_column_index(column_indexer_agent: ColumnIndexerAgent):
@@ -411,23 +361,50 @@ def render_phase3_features(sheet_catalog_agent: SheetCatalogAgent, column_indexe
         st.markdown("**Export Capabilities**")
         
         # Export options
-        export_format = st.selectbox("Export Format:", ["csv", "excel", "json"])
+        export_format = st.selectbox("Export Format:", ["csv", "excel", "json", "docx"])
         
         if st.button("📤 Export Current Data", use_container_width=True):
             if hasattr(column_indexer_agent, 'query_engine'):
                 try:
                     # Export the first sheet as example
                     first_sheet = list(sheet_catalog_agent.sheet_catalog.values())[0]
-                    file_content, filename = column_indexer_agent.query_engine.export_results(
-                        first_sheet, format=export_format
-                    )
                     
-                    st.download_button(
-                        label=f"📥 Download {filename}",
-                        data=file_content,
-                        file_name=filename,
-                        mime="application/octet-stream"
-                    )
+                    if export_format == "docx":
+                        # Handle DOCX export separately
+                        from utils.docx_utils import dataframe_to_docx_table
+                        import pandas as pd
+                        
+                        # Get the data as DataFrame first
+                        file_content, filename = column_indexer_agent.query_engine.export_results(
+                            first_sheet, format="csv"
+                        )
+                        
+                        # Convert CSV content to DataFrame
+                        csv_buffer = io.StringIO(file_content)
+                        df = pd.read_csv(csv_buffer)
+                        
+                        # Convert to DOCX
+                        docx_data = dataframe_to_docx_table(df, title=f"Excel Data Export - {first_sheet}")
+                        docx_filename = filename.replace('.csv', '.docx')
+                        
+                        st.download_button(
+                            label=f"📥 Download {docx_filename}",
+                            data=docx_data,
+                            file_name=docx_filename,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                    else:
+                        # Handle other formats normally
+                        file_content, filename = column_indexer_agent.query_engine.export_results(
+                            first_sheet, format=export_format
+                        )
+                        
+                        st.download_button(
+                            label=f"📥 Download {filename}",
+                            data=file_content,
+                            file_name=filename,
+                            mime="application/octet-stream"
+                        )
                     
                 except Exception as e:
                     st.error(f"Export failed: {e}")
@@ -505,13 +482,29 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                         clean_text = re.sub(r'\n+', '\n', clean_text).strip()
                         
                         if clean_text:
-                            st.download_button(
-                                label="📄 Download Text",
-                                data=clean_text,
-                                file_name=f"excel_analysis_response_{i+1}.txt",
-                                mime="text/plain",
-                                use_container_width=True
-                            )
+                            # Create two columns for text download options
+                            txt_col, docx_col = st.columns(2)
+                            
+                            with txt_col:
+                                st.download_button(
+                                    label="📄 TXT",
+                                    data=clean_text,
+                                    file_name=f"excel_analysis_response_{i+1}.txt",
+                                    mime="text/plain",
+                                    use_container_width=True
+                                )
+                            
+                            with docx_col:
+                                # Convert to DOCX
+                                from utils.docx_utils import text_to_docx
+                                docx_data = text_to_docx(clean_text, title=f"Excel Analysis Response {i+1}")
+                                st.download_button(
+                                    label="📝 DOCX",
+                                    data=docx_data,
+                                    file_name=f"excel_analysis_response_{i+1}.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    use_container_width=True
+                                )
                     
                     # Download CSV data if available (dual-output only)
                     if has_data and col4:
@@ -520,18 +513,34 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                             if 0 <= data_idx < len(st.session_state.get("excel_plot_data", [])):
                                 data_df = st.session_state.excel_plot_data[data_idx]
                                 
-                                # Convert DataFrame to CSV
-                                csv_buffer = io.StringIO()
-                                data_df.to_csv(csv_buffer, index=False)
-                                csv_data = csv_buffer.getvalue()
+                                # Create two columns for data download options
+                                csv_col, docx_col = st.columns(2)
                                 
-                                st.download_button(
-                                    label="📊 Download Data (CSV)",
-                                    data=csv_data,
-                                    file_name=f"excel_plot_data_{i+1}.csv",
-                                    mime="text/csv",
-                                    use_container_width=True
-                                )
+                                with csv_col:
+                                    # Convert DataFrame to CSV
+                                    csv_buffer = io.StringIO()
+                                    data_df.to_csv(csv_buffer, index=False)
+                                    csv_data = csv_buffer.getvalue()
+                                    
+                                    st.download_button(
+                                        label="📊 CSV",
+                                        data=csv_data,
+                                        file_name=f"excel_plot_data_{i+1}.csv",
+                                        mime="text/csv",
+                                        use_container_width=True
+                                    )
+                                
+                                with docx_col:
+                                    # Convert DataFrame to DOCX table
+                                    from utils.docx_utils import dataframe_to_docx_table
+                                    docx_data = dataframe_to_docx_table(data_df, title=f"Excel Plot Data {i+1}")
+                                    st.download_button(
+                                        label="📝 DOCX",
+                                        data=docx_data,
+                                        file_name=f"excel_plot_data_{i+1}.docx",
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                        use_container_width=True
+                                    )
                     
                     # Download plot if available
                     plot_col = col4 if has_data else col3
@@ -837,44 +846,30 @@ def excel_analysis_page():
         file = st.file_uploader("Choose Excel file", type=["xlsx", "xls"])
         
         if file:
-            if ("excel_sheet_catalog" not in st.session_state) or (st.session_state.get("excel_current_file") != file.name):
+            # Always store the raw file bytes and filename in session state
+            if ("excel_file_bytes" not in st.session_state) or (st.session_state.get("excel_current_file") != file.name):
                 logger.info(f"📁 New Excel file uploaded: {file.name}")
-                
-                try:
-                    # Initialize Excel agents
-                    sheet_catalog_agent = SheetCatalogAgent()
-                    column_indexer_agent = ColumnIndexerAgent({})
-                    
-                    # Read Excel file
-                    with st.spinner("Reading Excel file..."):
-                        file_content = io.BytesIO(file.read())
-                        file.seek(0)  # Reset file pointer
-                        
-                        # Read all sheets
-                        sheet_catalog = sheet_catalog_agent.read_excel_file(file_content, file.name)
-                        
-                        # Build column index
-                        column_indexer_agent = ColumnIndexerAgent(sheet_catalog)
-                        column_index = column_indexer_agent.build_column_index()
-                    
-                    # Store in session state
-                    st.session_state.excel_sheet_catalog = sheet_catalog_agent
-                    st.session_state.excel_column_indexer = column_indexer_agent
-                    st.session_state.excel_current_file = file.name
-                    st.session_state.excel_messages = []
-                    
-                    st.success(f"✅ Successfully loaded {len(sheet_catalog)} sheets from {file.name}")
-                    logger.info(f"📊 Loaded Excel file: {len(sheet_catalog)} sheets")
-                    
-                except Exception as e:
-                    st.error(f"❌ Error loading Excel file: {str(e)}")
-                    logger.error(f"❌ Failed to load Excel file {file.name}: {e}")
-                    return
+                st.session_state.excel_file_bytes = file.read()
+                st.session_state.excel_current_file = file.name
+                st.session_state.excel_messages = []
+                st.success(f"✅ Successfully uploaded {file.name}")
+                st.rerun()
             
             # Show file info
-            if "excel_sheet_catalog" in st.session_state:
-                sheet_catalog_agent = st.session_state.excel_sheet_catalog
-                column_indexer_agent = st.session_state.excel_column_indexer
+            if "excel_file_bytes" in st.session_state and "excel_current_file" in st.session_state:
+                # Reconstruct SheetCatalogAgent and ColumnIndexerAgent from file bytes
+                file_content = io.BytesIO(st.session_state.excel_file_bytes)
+                file_content.seek(0)
+                filename = st.session_state.excel_current_file
+                sheet_catalog_agent = SheetCatalogAgent()
+                try:
+                    sheet_catalog = sheet_catalog_agent.read_excel_file(file_content, filename)
+                except Exception as e:
+                    st.error(f"❌ Error loading Excel file: {str(e)}")
+                    logger.error(f"❌ Failed to load Excel file {filename}: {e}")
+                    return
+                column_indexer_agent = ColumnIndexerAgent(sheet_catalog)
+                column_indexer_agent.build_column_index()
                 
                 # Show sheet catalog
                 render_sheet_catalog(sheet_catalog_agent)
@@ -892,9 +887,19 @@ def excel_analysis_page():
     
     with right:
         # Chat interface
-        if "excel_sheet_catalog" in st.session_state:
-            sheet_catalog_agent = st.session_state.excel_sheet_catalog
-            column_indexer_agent = st.session_state.excel_column_indexer
+        if "excel_file_bytes" in st.session_state and "excel_current_file" in st.session_state:
+            file_content = io.BytesIO(st.session_state.excel_file_bytes)
+            file_content.seek(0)
+            filename = st.session_state.excel_current_file
+            sheet_catalog_agent = SheetCatalogAgent()
+            try:
+                sheet_catalog = sheet_catalog_agent.read_excel_file(file_content, filename)
+            except Exception as e:
+                st.error(f"❌ Error loading Excel file: {str(e)}")
+                logger.error(f"❌ Failed to load Excel file {filename}: {e}")
+                return
+            column_indexer_agent = ColumnIndexerAgent(sheet_catalog)
+            column_indexer_agent.build_column_index()
             render_chat_interface(sheet_catalog_agent, column_indexer_agent)
         else:
             st.info("Upload an Excel file to start chatting with your data.") 

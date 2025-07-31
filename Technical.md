@@ -38,6 +38,9 @@ The **Business Analysis HR Agent** is an AI-powered data-analysis platform that 
 
 Readers are expected to be comfortable with Python 3.10+, virtual environments, and containerised deployments.
 
+## Recent Updates
+* **DOCX Export Feature** - Added comprehensive DOCX download functionality for all text and data exports using python-docx library
+
 ## Conceptual Overview
 The application follows a **multi-agent micro-kernel** pattern:
 * **Memory Agent** – retrieves and stores column descriptions, manages system prompts, and maintains conversation context.
@@ -114,7 +117,7 @@ data-analysis-agent/
 ├── agents/            # AI agent definitions
 ├── app_core/          # Core business logic & helpers
 ├── pages/             # Streamlit UI pages
-├── utils/             # Shared utilities (retry, cache, circuit breaker, health, metrics, navigation, system prompts, plot helpers)
+├── utils/             # Shared utilities (retry, cache, circuit breaker, health, metrics, navigation, system prompts, plot helpers, docx utils)
 ├── tests/             # Pytest suite
 └── streamlit_app.py   # Entrypoint
 ```
@@ -182,6 +185,14 @@ data-analysis-agent/
   - Parallel column analysis (ThreadPoolExecutor)
   - Dual-output contract for plots (fig, data_df) for instant download/export
   - Session and persistent caches for repeated queries
+
+## Export & Download Features
+- **DOCX Export** (`utils/docx_utils.py`):
+  - `text_to_docx()` - Converts analysis text to formatted Word documents
+  - `dataframe_to_docx_table()` - Converts DataFrames to Word tables
+  - `analysis_to_docx()` - Creates comprehensive reports with text and data
+  - Integrated into all download buttons alongside TXT, CSV, and PNG options
+- **Multi-format Downloads**: All analysis responses now support TXT, DOCX, CSV, and PNG formats
 
 ## Testing Strategy
 - Unit tests in `tests/` executed with `pytest`.

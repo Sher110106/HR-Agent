@@ -27,6 +27,7 @@ class ExcelErrorType(Enum):
     DATA_TYPE_CONFLICT = "data_type_conflict"
     JOIN_KEY_MISSING = "join_key_missing"
     EXECUTION_ERROR = "execution_error"
+    CATEGORICAL_ERROR = "categorical_error"
 
 
 @dataclass
@@ -98,18 +99,16 @@ class ExcelErrorHandler:
                 message=f"Sheet '{sheet_name}' is empty or contains no data",
                 details=f"Error: {str(error)}",
                 recovery_suggestion="Check if the sheet contains data or skip this sheet",
-                severity="low",
-                affected_sheets=[sheet_name]
+                severity="medium"
             )
         
-        elif "memory" in error_msg or "size" in error_msg:
+        elif "memory" in error_msg or "out of memory" in error_msg:
             return ExcelError(
                 error_type=ExcelErrorType.MEMORY_LIMIT,
                 message=f"Sheet '{sheet_name}' is too large to process",
                 details=f"Error: {str(error)}",
-                recovery_suggestion="Consider splitting the sheet into smaller parts or using data sampling",
-                severity="high",
-                affected_sheets=[sheet_name]
+                recovery_suggestion="Try processing a smaller subset of the data or split the sheet",
+                severity="high"
             )
         
         else:
@@ -117,37 +116,72 @@ class ExcelErrorHandler:
                 error_type=ExcelErrorType.EXECUTION_ERROR,
                 message=f"Error processing sheet '{sheet_name}'",
                 details=f"Error: {str(error)}",
-                recovery_suggestion="Try processing the sheet individually or check for data format issues",
+                recovery_suggestion="Check the sheet format and try again",
+                severity="medium"
+            )
+    
+    def handle_categorical_error(self, error: Exception, column_name: str, sheet_name: str) -> ExcelError:
+        """Handle categorical data type errors."""
+        error_msg = str(error).lower()
+        
+        if "categorical" in error_msg and "new category" in error_msg:
+            return ExcelError(
+                error_type=ExcelErrorType.CATEGORICAL_ERROR,
+                message=f"Categorical data issue in column '{column_name}' of sheet '{sheet_name}'",
+                details=f"Error: {str(error)}",
+                recovery_suggestion="Convert categorical column to string type before processing: df['column'] = df['column'].astype(str)",
                 severity="medium",
+                affected_columns=[column_name],
+                affected_sheets=[sheet_name]
+            )
+        
+        elif "categorical" in error_msg:
+            return ExcelError(
+                error_type=ExcelErrorType.CATEGORICAL_ERROR,
+                message=f"Categorical data type issue in column '{column_name}' of sheet '{sheet_name}'",
+                details=f"Error: {str(error)}",
+                recovery_suggestion="Handle categorical data by converting to string or using proper categorical operations",
+                severity="medium",
+                affected_columns=[column_name],
+                affected_sheets=[sheet_name]
+            )
+        
+        else:
+            return ExcelError(
+                error_type=ExcelErrorType.DATA_TYPE_CONFLICT,
+                message=f"Data type issue in column '{column_name}' of sheet '{sheet_name}'",
+                details=f"Error: {str(error)}",
+                recovery_suggestion="Check data types and convert incompatible columns",
+                severity="medium",
+                affected_columns=[column_name],
                 affected_sheets=[sheet_name]
             )
     
     def handle_data_type_conflict(self, column_name: str, sheet_name: str, expected_type: str, actual_type: str) -> ExcelError:
-        """Handle data type conflicts in columns."""
+        """Handle data type conflicts between sheets."""
         return ExcelError(
             error_type=ExcelErrorType.DATA_TYPE_CONFLICT,
-            message=f"Data type conflict in column '{column_name}'",
-            details=f"Expected {expected_type} but found {actual_type} in sheet '{sheet_name}'",
-            recovery_suggestion="Consider data type conversion or cleaning the column data",
+            message=f"Data type mismatch in column '{column_name}'",
+            details=f"Expected {expected_type} in sheet '{sheet_name}', but found {actual_type}",
+            recovery_suggestion="Convert columns to compatible types before joining or unioning sheets",
             severity="medium",
-            affected_sheets=[sheet_name],
-            affected_columns=[column_name]
+            affected_columns=[column_name],
+            affected_sheets=[sheet_name]
         )
     
     def handle_join_error(self, join_keys: List[str], sheets: List[str], error: Exception) -> ExcelError:
         """Handle errors during sheet joining operations."""
         return ExcelError(
             error_type=ExcelErrorType.JOIN_KEY_MISSING,
-            message="Unable to join sheets using the specified keys",
+            message="Cannot join sheets due to missing keys. Check your data structure.",
             details=f"Join keys: {join_keys}, Sheets: {sheets}, Error: {str(error)}",
-            recovery_suggestion="Check if join keys exist in all sheets and have compatible data types",
-            severity="medium",
-            affected_sheets=sheets,
-            affected_columns=join_keys
+            recovery_suggestion="Check that join keys exist in all sheets and have compatible data types",
+            severity="high",
+            affected_sheets=sheets
         )
     
     def validate_dataframe(self, df: pd.DataFrame, sheet_name: str) -> List[ExcelError]:
-        """Validate a DataFrame for common issues."""
+        """Validate DataFrame for common issues."""
         errors = []
         
         # Check for empty DataFrame
@@ -155,245 +189,186 @@ class ExcelErrorHandler:
             errors.append(ExcelError(
                 error_type=ExcelErrorType.SHEET_EMPTY,
                 message=f"Sheet '{sheet_name}' is empty",
-                details="DataFrame contains no rows or columns",
-                recovery_suggestion="Check if the sheet contains data or skip this sheet",
-                severity="low",
-                affected_sheets=[sheet_name]
-            ))
-        
-        # Check for memory usage
-        memory_usage = df.memory_usage(deep=True).sum()
-        if memory_usage > 100 * 1024 * 1024:  # 100MB limit
-            errors.append(ExcelError(
-                error_type=ExcelErrorType.MEMORY_LIMIT,
-                message=f"Sheet '{sheet_name}' uses excessive memory",
-                details=f"Memory usage: {memory_usage / 1024 / 1024:.1f} MB",
-                recovery_suggestion="Consider data sampling or column selection to reduce memory usage",
+                details="DataFrame has no rows or columns",
+                recovery_suggestion="Check if the sheet contains data",
                 severity="medium",
                 affected_sheets=[sheet_name]
             ))
         
-        # Check for data type issues
+        # Check for categorical columns that might cause issues
+        categorical_columns = []
         for col in df.columns:
-            if df[col].dtype == 'object':
-                # Check for mixed data types in object columns
-                sample_values = df[col].dropna().head(10)
-                if len(sample_values) > 0:
-                    try:
-                        pd.to_numeric(sample_values, errors='raise')
-                    except (ValueError, TypeError):
-                        # This is expected for text columns
-                        pass
+            if df[col].dtype.name == 'category':
+                categorical_columns.append(col)
+        
+        if categorical_columns:
+            logger.warning(f"⚠️ Found categorical columns in {sheet_name}: {categorical_columns}")
+            # Don't add as error, just log for awareness
+        
+        # Check for memory usage
+        memory_usage = df.memory_usage(deep=True).sum() / 1024 / 1024  # MB
+        if memory_usage > 100:  # 100MB threshold
+            errors.append(ExcelError(
+                error_type=ExcelErrorType.MEMORY_LIMIT,
+                message=f"Sheet '{sheet_name}' uses {memory_usage:.1f}MB of memory",
+                details="Large memory usage may cause performance issues",
+                recovery_suggestion="Consider sampling the data or optimizing data types",
+                severity="low",
+                affected_sheets=[sheet_name]
+            ))
         
         return errors
     
     def get_user_friendly_message(self, error: ExcelError) -> str:
         """Convert error to user-friendly message."""
-        severity_icons = {
-            'low': 'ℹ️',
-            'medium': '⚠️',
-            'high': '🚨',
-            'critical': '💥'
+        messages = {
+            ExcelErrorType.FILE_CORRUPTED: "📁 The Excel file appears to be corrupted. Please try opening it in Excel and saving it again.",
+            ExcelErrorType.SHEET_EMPTY: "📄 One or more sheets are empty. Please check your Excel file.",
+            ExcelErrorType.MEMORY_LIMIT: "💾 The file is too large to process efficiently. Consider splitting the data.",
+            ExcelErrorType.PERMISSION_DENIED: "🔒 Cannot access the file. Check file permissions.",
+            ExcelErrorType.INVALID_FORMAT: "📋 The file format is not supported. Please use .xlsx or .xls files.",
+            ExcelErrorType.DATA_TYPE_CONFLICT: "🔧 Data type conflicts detected. The system will attempt to resolve them.",
+            ExcelErrorType.CATEGORICAL_ERROR: "📊 Categorical data issue detected. Converting to string format.",
+            ExcelErrorType.JOIN_KEY_MISSING: "🔗 Cannot join sheets due to missing keys. Check your data structure.",
+            ExcelErrorType.EXECUTION_ERROR: "⚡ An error occurred during processing. Please try again."
         }
         
-        icon = severity_icons.get(error.severity, '❌')
-        
-        message = f"{icon} **{error.message}**\n\n"
-        message += f"**Details:** {error.details}\n\n"
-        message += f"**Suggestion:** {error.recovery_suggestion}"
-        
-        if error.affected_sheets:
-            message += f"\n\n**Affected sheets:** {', '.join(error.affected_sheets)}"
-        
-        if error.affected_columns:
-            message += f"\n\n**Affected columns:** {', '.join(error.affected_columns)}"
-        
-        return message
+        return messages.get(error.error_type, f"❌ {error.message}")
     
     def log_error(self, error: ExcelError) -> None:
-        """Log error for debugging and monitoring."""
+        """Log error for debugging."""
         self.error_history.append(error)
-        logger.error(f"Excel Error [{error.error_type.value}]: {error.message}")
-        logger.error(f"Details: {error.details}")
-        logger.error(f"Severity: {error.severity}")
+        logger.error(f"❌ {error.error_type.value}: {error.message}")
+        logger.debug(f"📋 Error details: {error.details}")
     
     def get_error_summary(self) -> Dict[str, Any]:
-        """Get summary of all errors encountered."""
-        if not self.error_history:
-            return {"total_errors": 0, "by_severity": {}, "by_type": {}}
-        
-        by_severity = {}
-        by_type = {}
-        
+        """Get summary of all errors."""
+        error_counts = {}
         for error in self.error_history:
-            by_severity[error.severity] = by_severity.get(error.severity, 0) + 1
-            by_type[error.error_type.value] = by_type.get(error.error_type.value, 0) + 1
+            error_type = error.error_type.value
+            error_counts[error_type] = error_counts.get(error_type, 0) + 1
         
         return {
             "total_errors": len(self.error_history),
-            "by_severity": by_severity,
-            "by_type": by_type,
-            "recent_errors": [error.message for error in self.error_history[-5:]]
+            "error_counts": error_counts,
+            "recovery_attempts": self.recovery_attempts
         }
 
 
 class DataTypeConverter:
-    """Handles data type conversion and validation."""
+    """Handles data type conversion and optimization."""
     
     @staticmethod
     def infer_and_convert_types(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-        """Infer and convert data types automatically."""
+        """Infer and convert data types, handling categorical issues."""
         conversion_log = []
+        df_copy = df.copy()
         
-        for col in df.columns:
-            original_dtype = df[col].dtype
-            
-            # Skip if already numeric
-            if pd.api.types.is_numeric_dtype(df[col]):
-                continue
-            
-            # Try to convert to numeric
+        for column in df_copy.columns:
             try:
-                # Handle percentage strings
-                if df[col].dtype == 'object':
-                    sample_values = df[col].dropna().head(10)
-                    if len(sample_values) > 0:
-                        # Check if values contain percentage signs
-                        if any('%' in str(val) for val in sample_values):
-                            # Convert percentage strings to float
-                            df[col] = df[col].astype(str).str.rstrip('%').astype('float64') / 100.0
-                            conversion_log.append(f"Converted {col} from percentage strings to float")
-                            continue
+                # Handle categorical columns that might cause issues
+                if df_copy[column].dtype.name == 'category':
+                    # Convert categorical to string to avoid issues
+                    df_copy[column] = df_copy[column].astype(str)
+                    conversion_log.append(f"Converted categorical column '{column}' to string")
+                    logger.info(f"🔄 Converted categorical column '{column}' to string to prevent issues")
                 
-                # Try numeric conversion
-                converted = pd.to_numeric(df[col], errors='coerce')
-                if not converted.isna().all():  # Only convert if we get some valid numbers
-                    df[col] = converted
-                    conversion_log.append(f"Converted {col} from {original_dtype} to numeric")
-                    
-            except (ValueError, TypeError):
-                # Try date conversion
-                try:
-                    converted = pd.to_datetime(df[col], errors='coerce')
-                    if not converted.isna().all():
-                        df[col] = converted
-                        conversion_log.append(f"Converted {col} from {original_dtype} to datetime")
-                except (ValueError, TypeError):
-                    # Keep as object/string
-                    pass
+                # Handle object columns that might be dates
+                elif df_copy[column].dtype == 'object':
+                    # Try to convert to datetime, if it fails, keep as object
+                    try:
+                        pd.to_datetime(df_copy[column], errors='raise')
+                        df_copy[column] = pd.to_datetime(df_copy[column], errors='coerce')
+                        conversion_log.append(f"Converted column '{column}' to datetime")
+                    except (ValueError, TypeError):
+                        # Keep as object if not a date
+                        pass
+                
+                # Optimize numeric columns
+                elif pd.api.types.is_numeric_dtype(df_copy[column]):
+                    # Downcast numeric types to save memory
+                    if df_copy[column].dtype == 'int64':
+                        df_copy[column] = pd.to_numeric(df_copy[column], downcast='integer')
+                    elif df_copy[column].dtype == 'float64':
+                        df_copy[column] = pd.to_numeric(df_copy[column], downcast='float')
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to convert column '{column}': {e}")
+                conversion_log.append(f"Failed to convert column '{column}': {e}")
         
-        return df, conversion_log
+        return df_copy, conversion_log
     
     @staticmethod
     def validate_join_compatibility(df1: pd.DataFrame, df2: pd.DataFrame, join_key: str) -> Tuple[bool, str]:
         """Validate if two DataFrames can be joined on a key."""
-        if join_key not in df1.columns or join_key not in df2.columns:
-            return False, f"Join key '{join_key}' not found in both DataFrames"
+        if join_key not in df1.columns:
+            return False, f"Join key '{join_key}' not found in first DataFrame"
         
-        # Check data types
-        dtype1 = df1[join_key].dtype
-        dtype2 = df2[join_key].dtype
+        if join_key not in df2.columns:
+            return False, f"Join key '{join_key}' not found in second DataFrame"
         
-        if dtype1 != dtype2:
-            # Try to convert for compatibility
-            try:
-                if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(dtype2):
-                    return True, f"Compatible numeric types: {dtype1} and {dtype2}"
-                elif pd.api.types.is_string_dtype(dtype1) or pd.api.types.is_string_dtype(dtype2):
-                    return True, f"Compatible string types: {dtype1} and {dtype2}"
-                else:
-                    return False, f"Incompatible data types: {dtype1} and {dtype2}"
-            except Exception:
-                return False, f"Cannot convert between types: {dtype1} and {dtype2}"
+        # Check for categorical compatibility
+        if df1[join_key].dtype.name == 'category' and df2[join_key].dtype.name == 'category':
+            # Check if categories are compatible
+            cat1 = set(df1[join_key].cat.categories)
+            cat2 = set(df2[join_key].cat.categories)
+            if not cat1.issubset(cat2) and not cat2.issubset(cat1):
+                return False, f"Categorical join key '{join_key}' has incompatible categories"
         
-        return True, f"Compatible data types: {dtype1}"
+        return True, "Join compatibility validated"
 
 
 class MemoryOptimizer:
-    """Handles memory optimization for large Excel files."""
+    """Optimizes DataFrame memory usage."""
     
     @staticmethod
     def optimize_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """Optimize DataFrame memory usage."""
         original_memory = df.memory_usage(deep=True).sum()
-        optimization_log = {}
+        df_optimized = df.copy()
         
-        # Optimize numeric columns
-        for col in df.select_dtypes(include=['int64']).columns:
-            col_min = df[col].min()
-            col_max = df[col].max()
+        optimizations = {}
+        
+        for column in df_optimized.columns:
+            col_type = df_optimized[column].dtype
             
-            if col_min >= 0:
-                if col_max < 255:
-                    df[col] = df[col].astype('uint8')
-                    optimization_log[col] = 'int64 -> uint8'
-                elif col_max < 65535:
-                    df[col] = df[col].astype('uint16')
-                    optimization_log[col] = 'int64 -> uint16'
-                elif col_max < 4294967295:
-                    df[col] = df[col].astype('uint32')
-                    optimization_log[col] = 'int64 -> uint32'
-            else:
-                if col_min > -128 and col_max < 127:
-                    df[col] = df[col].astype('int8')
-                    optimization_log[col] = 'int64 -> int8'
-                elif col_min > -32768 and col_max < 32767:
-                    df[col] = df[col].astype('int16')
-                    optimization_log[col] = 'int64 -> int16'
-                elif col_min > -2147483648 and col_max < 2147483647:
-                    df[col] = df[col].astype('int32')
-                    optimization_log[col] = 'int64 -> int32'
+            # Handle categorical columns
+            if col_type.name == 'category':
+                # Convert to string to avoid categorical issues
+                df_optimized[column] = df_optimized[column].astype(str)
+                optimizations[column] = "categorical_to_string"
+            
+            # Optimize numeric columns
+            elif pd.api.types.is_numeric_dtype(col_type):
+                if col_type == 'int64':
+                    df_optimized[column] = pd.to_numeric(df_optimized[column], downcast='integer')
+                    optimizations[column] = "downcasted_integer"
+                elif col_type == 'float64':
+                    df_optimized[column] = pd.to_numeric(df_optimized[column], downcast='float')
+                    optimizations[column] = "downcasted_float"
+            
+            # Optimize object columns
+            elif col_type == 'object':
+                # Check if it's actually a string column
+                if df_optimized[column].dtype == 'object':
+                    # Convert to string to avoid potential issues
+                    df_optimized[column] = df_optimized[column].astype(str)
+                    optimizations[column] = "object_to_string"
         
-        # Optimize float columns
-        for col in df.select_dtypes(include=['float64']).columns:
-            df[col] = df[col].astype('float32')
-            optimization_log[col] = 'float64 -> float32'
-        
-        # Optimize object columns
-        for col in df.select_dtypes(include=['object']).columns:
-            if df[col].nunique() / len(df[col]) < 0.5:  # Less than 50% unique values
-                df[col] = df[col].astype('category')
-                optimization_log[col] = 'object -> category'
-        
-        optimized_memory = df.memory_usage(deep=True).sum()
+        optimized_memory = df_optimized.memory_usage(deep=True).sum()
         memory_saved = original_memory - optimized_memory
         
-        return df, {
-            'original_memory_mb': original_memory / 1024 / 1024,
-            'optimized_memory_mb': optimized_memory / 1024 / 1024,
-            'memory_saved_mb': memory_saved / 1024 / 1024,
-            'optimization_log': optimization_log
+        return df_optimized, {
+            "original_memory_mb": original_memory / 1024 / 1024,
+            "optimized_memory_mb": optimized_memory / 1024 / 1024,
+            "memory_saved_mb": memory_saved / 1024 / 1024,
+            "optimizations": optimizations
         }
     
     @staticmethod
     def sample_large_dataframe(df: pd.DataFrame, max_rows: int = 10000) -> pd.DataFrame:
-        """Sample a large DataFrame to reduce memory usage."""
-        if len(df) <= max_rows:
-            return df
-        
-        # Use stratified sampling if possible
-        if len(df.columns) > 0:
-            # Sample based on the first categorical column if available
-            cat_cols = df.select_dtypes(include=['category', 'object']).columns
-            if len(cat_cols) > 0:
-                sample_col = cat_cols[0]
-                sample_ratio = min(max_rows / len(df), 1.0)
-                df_sample = df.groupby(sample_col, group_keys=False).apply(
-                    lambda x: x.sample(frac=sample_ratio, random_state=42)
-                )
-                # Ensure we get exactly max_rows
-                if len(df_sample) > max_rows:
-                    return df_sample.head(max_rows)
-                elif len(df_sample) < max_rows:
-                    # If we don't have enough rows, add more random samples
-                    remaining_rows = max_rows - len(df_sample)
-                    additional_sample = df[~df.index.isin(df_sample.index)].sample(
-                        n=min(remaining_rows, len(df) - len(df_sample)), 
-                        random_state=42
-                    )
-                    return pd.concat([df_sample, additional_sample], ignore_index=True)
-                else:
-                    return df_sample
-        
-        # Simple random sampling
-        return df.sample(n=max_rows, random_state=42) 
+        """Sample large DataFrames to improve performance."""
+        if len(df) > max_rows:
+            logger.info(f"📊 Sampling DataFrame from {len(df)} to {max_rows} rows for performance")
+            return df.sample(n=max_rows, random_state=42)
+        return df 
