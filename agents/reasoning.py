@@ -211,7 +211,6 @@ Begin by streaming your detailed analytical process within `<think>...</think>` 
     
     response = make_llm_call(
         messages=messages,
-        model="gpt-4.1",
         temperature=0.3,
         max_tokens=5000,
         stream=True

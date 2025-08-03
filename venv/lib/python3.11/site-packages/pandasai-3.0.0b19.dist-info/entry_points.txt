@@ -1,0 +1,3 @@
+[console_scripts]
+pai=pandasai.cli.main:cli
+

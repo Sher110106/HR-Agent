@@ -50,7 +50,6 @@ Respond with only 'true' for any explicit or implicit visualization request. For
     try:
         response = make_llm_call(
             messages=messages,
-            model="gpt-4.1", 
             temperature=0.1,
             max_tokens=1000
         )
@@ -150,6 +149,20 @@ REQUIREMENTS
     – optimize_figure_size(ax)
     – add_value_labels(ax, label_mode="minimal") # Use sparingly for key insights only
     – handle_seaborn_warnings() # Call at start to suppress harmless seaborn warnings
+    – safe_binning(data, bins, labels=None, method='cut') # Safe binning with automatic validation
+    
+    CRITICAL - PANDAS CUT/BINNING VALIDATION:
+    - When using pd.cut(), ALWAYS ensure labels length = bins length - 1
+    - Example: bins=[0,1,3,5], labels=['0-1','1-3','3-5'] (3 labels for 4 bins)
+    - For automatic binning without labels: pd.cut(df['col'], bins=5) # No labels parameter
+    - For custom bins with labels: pd.cut(df['col'], bins=[0,1,3,5], labels=['0-1','1-3','3-5'])
+    - ALWAYS validate: len(labels) == len(bins) - 1 before using pd.cut()
+    - If unsure, use automatic binning: pd.cut(df['col'], bins=5) without labels
+    - RECOMMENDED: Use safe_binning() instead of pd.cut() for automatic error prevention
+    - SAFE BINNING EXAMPLES:
+      * Automatic: df['bins'] = safe_binning(df['col'], bins=5)
+      * Custom bins: df['bins'] = safe_binning(df['col'], bins=[0,1,3,5], labels=['0-1','1-3','3-5'])
+      * Equal frequency: df['bins'] = safe_binning(df['col'], bins=5, method='qcut')
     
     SEABORN PALETTE GUIDANCE:
     - For category-specific colors: palette = create_category_palette(df['category_col'].unique())
@@ -374,7 +387,6 @@ Output ONLY a properly-closed ```python code block. Use smart_date_parser() for 
     try:
         response = make_llm_call(
             messages=messages,
-            model="gpt-4.1",
             temperature=0.2,
             max_tokens=4000
         )

@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
+import matplotlib
 import chardet
 from datetime import datetime
 from typing import Dict, Any
@@ -14,14 +15,71 @@ from agents import (
 )
 from agents.memory import SystemPromptMemoryAgent
 from utils.system_prompts import get_prompt_manager
+from app_core.api import get_available_models
+# Import Phase 1 and Phase 2 plot enhancements
+from utils.plot_helpers import (
+    PlotMemory, is_plot_modification_request, generate_plot_modification_code,
+    create_enhanced_chart_with_insights, detect_insights, add_insight_annotations,
+    get_hr_specific_colors, get_contextual_colors, apply_modern_styling
+)
 
 logger = logging.getLogger(__name__)
+
+def get_llm_call_with_selected_model():
+    """Get make_llm_call function with the selected model from session state."""
+    from app_core.api import make_llm_call
+    
+    def llm_call_wrapper(messages, **kwargs):
+        # Get selected model from session state, fallback to default
+        selected_model = getattr(st.session_state, 'selected_model', 'gpt-4.1')
+        return make_llm_call(messages, model=selected_model, **kwargs)
+    
+    return llm_call_wrapper
 
 def render_system_prompt_sidebar():
     """Render system prompt controls in the sidebar."""
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎯 AI Behavior")
     
+    # Model Selection
+    st.sidebar.markdown("**🤖 AI Model:**")
+    available_models = get_available_models()
+    
+    if not available_models:
+        st.sidebar.error("❌ No AI models available. Please check your API configuration.")
+        return
+    
+    # Initialize model selection in session state
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = list(available_models.keys())[0]  # Default to first available
+    
+    # Model selection dropdown
+    model_options = list(available_models.keys())
+    model_labels = [available_models[model] for model in model_options]
+    
+    current_model_index = model_options.index(st.session_state.selected_model) if st.session_state.selected_model in model_options else 0
+    
+    selected_model_key = st.sidebar.selectbox(
+        "Choose AI Model:",
+        options=model_options,
+        format_func=lambda x: available_models[x],
+        index=current_model_index,
+        help="Select which AI model to use for analysis"
+    )
+    
+    # Update session state if selection changed
+    if selected_model_key != st.session_state.selected_model:
+        st.session_state.selected_model = selected_model_key
+        st.sidebar.success(f"✅ Switched to {available_models[selected_model_key]}")
+        st.rerun()
+    
+    # Show current model info
+    current_model_name = available_models.get(st.session_state.selected_model, "Unknown")
+    st.sidebar.info(f"🤖 Active Model: **{current_model_name}**")
+    
+    st.sidebar.markdown("---")
+    
+    # System Prompt Selection
     prompt_manager = get_prompt_manager()
     system_prompt_agent = SystemPromptMemoryAgent()
     
@@ -206,8 +264,8 @@ def data_analysis_page():
                 st.session_state.messages = []
                 logger.info(f"📊 Loaded DataFrame: {len(st.session_state.df)} rows, {len(st.session_state.df.columns)} columns")
                 with st.spinner("Generating dataset insights …"):
-                    from app_core.api import make_llm_call
-                    st.session_state.insights = DataInsightAgent(st.session_state.df, make_llm_call)
+                    llm_call_func = get_llm_call_with_selected_model()
+                    st.session_state.insights = DataInsightAgent(st.session_state.df, llm_call_func)
             st.dataframe(st.session_state.df.head())
             st.markdown("### Dataset Insights")
             st.markdown(st.session_state.insights)
@@ -220,7 +278,34 @@ def data_analysis_page():
             st.session_state.messages = []
 
         # Separator between dataset insights and chat area
+        # Initialize plot memory system for Phase 2 enhancements
+        if "plot_memory" not in st.session_state:
+            st.session_state.plot_memory = PlotMemory()
+        
+        # Add plot enhancement controls to sidebar
         if file and "df" in st.session_state:
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("🎨 Plot Enhancements")
+            
+            # Theme selection
+            plot_theme = st.sidebar.selectbox(
+                "Plot Theme:",
+                options=['professional', 'modern', 'minimal', 'elegant'],
+                index=0,
+                help="Choose the visual style for your plots"
+            )
+            
+            # Insight detection toggle
+            show_insights = st.sidebar.checkbox(
+                "🔍 Auto-detect Insights",
+                value=True,
+                help="Automatically detect and highlight key insights in plots"
+            )
+            
+            # Store settings in session state
+            st.session_state.plot_theme = plot_theme
+            st.session_state.show_insights = show_insights
+            
             st.markdown("---")
 
         chat_container = st.container()
@@ -270,29 +355,16 @@ def data_analysis_page():
                             clean_text = re.sub(r'\n+', '\n', clean_text).strip()
                             
                             if clean_text:
-                                # Create two columns for text download options
-                                txt_col, docx_col = st.columns(2)
-                                
-                                with txt_col:
-                                    st.download_button(
-                                        label="📄 TXT",
-                                        data=clean_text,
-                                        file_name=f"analysis_response_{i+1}.txt",
-                                        mime="text/plain",
-                                        use_container_width=True
-                                    )
-                                
-                                with docx_col:
-                                    # Convert to DOCX
-                                    from utils.docx_utils import text_to_docx
-                                    docx_data = text_to_docx(clean_text, title=f"Analysis Response {i+1}")
-                                    st.download_button(
-                                        label="📝 DOCX",
-                                        data=docx_data,
-                                        file_name=f"analysis_response_{i+1}.docx",
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                        use_container_width=True
-                                    )
+                                # Convert to DOCX
+                                from utils.docx_utils import text_to_docx
+                                docx_data = text_to_docx(clean_text, title=f"Analysis Response {i+1}")
+                                st.download_button(
+                                    label="📝 DOCX",
+                                    data=docx_data,
+                                    file_name=f"analysis_response_{i+1}.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    use_container_width=True
+                                )
                         
                         # Download CSV data if available (dual-output only)
                         if has_data and col4:
@@ -301,34 +373,18 @@ def data_analysis_page():
                                 if 0 <= data_idx < len(st.session_state.get("plot_data", [])):
                                     data_df = st.session_state.plot_data[data_idx]
                                     
-                                    # Create two columns for data download options
-                                    csv_col, docx_col = st.columns(2)
+                                    # Convert DataFrame to CSV
+                                    csv_buffer = io.StringIO()
+                                    data_df.to_csv(csv_buffer, index=False)
+                                    csv_data = csv_buffer.getvalue()
                                     
-                                    with csv_col:
-                                        # Convert DataFrame to CSV
-                                        csv_buffer = io.StringIO()
-                                        data_df.to_csv(csv_buffer, index=False)
-                                        csv_data = csv_buffer.getvalue()
-                                        
-                                        st.download_button(
-                                            label="📊 CSV",
-                                            data=csv_data,
-                                            file_name=f"plot_data_{i+1}.csv",
-                                            mime="text/csv",
-                                            use_container_width=True
-                                        )
-                                    
-                                    with docx_col:
-                                        # Convert DataFrame to DOCX table
-                                        from utils.docx_utils import dataframe_to_docx_table
-                                        docx_data = dataframe_to_docx_table(data_df, title=f"Plot Data {i+1}")
-                                        st.download_button(
-                                            label="📝 DOCX",
-                                            data=docx_data,
-                                            file_name=f"plot_data_{i+1}.docx",
-                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                            use_container_width=True
-                                        )
+                                    st.download_button(
+                                        label="📊 CSV",
+                                        data=csv_data,
+                                        file_name=f"plot_data_{i+1}.csv",
+                                        mime="text/csv",
+                                        use_container_width=True
+                                    )
                         
                         # Download plot if available
                         plot_col = col4 if has_data else col3
@@ -373,8 +429,26 @@ def data_analysis_page():
                     start_time = datetime.now()
                     logger.info(f"⏱️ Processing started at {start_time}")
                     
-                    # Pass chat history and column memory to enable enhanced analysis
-                    code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages)
+                    # Check if this is a plot modification request
+                    if is_plot_modification_request(user_q) and st.session_state.plot_memory.plots:
+                        logger.info("🔄 Detected plot modification request")
+                        target_plot = st.session_state.plot_memory.get_plot_by_reference(user_q)
+                        if target_plot:
+                            # Generate modification code
+                            modification_prompt = generate_plot_modification_code(user_q, target_plot, st.session_state.df)
+                            code, should_plot_flag, code_thinking = CodeGenerationAgent(
+                                f"Modify the previous plot: {user_q}", 
+                                st.session_state.df, 
+                                st.session_state.messages,
+                                context=f"Previous plot: {target_plot['chart_type']} chart with data: {target_plot['data'].columns.tolist()}"
+                            )
+                        else:
+                            # Fall back to normal processing
+                            code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages)
+                    else:
+                        # Normal processing
+                        code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages)
+                    
                     result_obj = ExecutionAgent(code, st.session_state.df, should_plot_flag)
                     
                     # Auto-retry logic for common pandas errors
@@ -418,7 +492,7 @@ def data_analysis_page():
                     # Handle new dual-output format (fig, data_df)
                     fig, data_df = result_obj
                     
-                    # Store plot
+                    # Store plot in session state
                     st.session_state.plots.append(fig)
                     plot_idx = len(st.session_state.plots) - 1
                     
@@ -428,16 +502,53 @@ def data_analysis_page():
                     st.session_state.plot_data.append(data_df)
                     data_idx = len(st.session_state.plot_data) - 1
                     
+                    # Store in plot memory system for Phase 2 enhancements
+                    plot_theme = getattr(st.session_state, 'plot_theme', 'professional')
+                    show_insights = getattr(st.session_state, 'show_insights', True)
+                    
+                    # Detect chart type from the plot
+                    chart_type = 'bar'  # Default, could be enhanced with better detection
+                    if hasattr(fig, 'axes') and fig.axes:
+                        ax = fig.axes[0]
+                        if len(ax.get_children()) > 0:
+                            # Simple chart type detection
+                            children = ax.get_children()
+                            if any(isinstance(child, matplotlib.patches.Rectangle) for child in children):
+                                chart_type = 'bar'
+                            elif any(isinstance(child, matplotlib.lines.Line2D) for child in children):
+                                chart_type = 'line'
+                            elif any(isinstance(child, matplotlib.collections.PathCollection) for child in children):
+                                chart_type = 'scatter'
+                    
+                    # Add to plot memory
+                    memory_idx = st.session_state.plot_memory.add_plot(
+                        fig=fig,
+                        data_df=data_df,
+                        context=user_q,
+                        chart_type=chart_type,
+                        styling={'theme': plot_theme, 'insights': show_insights}
+                    )
+                    
                     header = "Here is your enhanced visualization with underlying data:"
-                    logger.info(f"📊 Dual-output added: plot at index {plot_idx}, data at index {data_idx} ({len(data_df)} rows)")
+                    logger.info(f"📊 Enhanced plot added: plot at index {plot_idx}, data at index {data_idx}, memory at {memory_idx} ({len(data_df)} rows)")
                     
                 elif is_plot:
                     # Handle legacy single plot format
                     fig = result_obj.figure if isinstance(result_obj, plt.Axes) else result_obj
                     st.session_state.plots.append(fig)
                     plot_idx = len(st.session_state.plots) - 1
+                    
+                    # Also store in plot memory
+                    memory_idx = st.session_state.plot_memory.add_plot(
+                        fig=fig,
+                        data_df=st.session_state.df,  # Use current dataframe
+                        context=user_q,
+                        chart_type='unknown',
+                        styling={'theme': 'professional', 'insights': False}
+                    )
+                    
                     header = "Here is the visualization you requested:"
-                    logger.info(f"📊 Legacy plot added to session state at index {plot_idx}")
+                    logger.info(f"📊 Legacy plot added to session state at index {plot_idx}, memory at {memory_idx}")
                     
                 elif isinstance(result_obj, (pd.DataFrame, pd.Series)):
                     header = f"Result: {len(result_obj)} rows" if isinstance(result_obj, pd.DataFrame) else "Result series"

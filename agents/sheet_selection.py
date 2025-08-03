@@ -353,7 +353,7 @@ Examples:
             logger.info("📤 Sending sheet planning request to LLM...")
             response = make_llm_call(
                 messages=messages,
-                model="gpt-4.1",
+                
                 temperature=0.1,
                 max_tokens=1000
             )

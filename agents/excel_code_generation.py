@@ -190,7 +190,7 @@ class ExcelCodeGenerationAgent:
             logger.info("📤 Sending code generation request to LLM...")
             response = make_llm_call(
                 messages=messages,
-                model="gpt-4.1",
+                
                 temperature=0.1,
                 max_tokens=2000
             )
@@ -458,7 +458,7 @@ result = {sheet_name}.describe()
             logger.info("📤 Sending retry code generation request to LLM...")
             response = make_llm_call(
                 messages=messages,
-                model="gpt-4.1",
+                
                 temperature=0.1,
                 max_tokens=2000
             )

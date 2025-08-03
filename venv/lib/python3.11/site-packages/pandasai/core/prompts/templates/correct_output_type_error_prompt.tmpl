@@ -1,0 +1,12 @@
+{% for df in context.dfs %}{% set index = loop.index %}{% include 'shared/dataframe.tmpl' with context %}{% endfor %}
+
+The user asked the following question:
+{{context.memory.get_conversation()}}
+
+You generated the following Python code:
+{{code}}
+
+However, it resulted in the following error:
+{{error}}
+
+Fix the python code above and return the new python code but the result type should be: {{output_type}}

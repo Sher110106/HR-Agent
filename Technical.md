@@ -1,7 +1,7 @@
 # Technical Manual – Business Analysis HR Agent
 
-> **Version 0.4**  
-> Last updated: {{DATE}}
+> **Version 0.5**  
+> Last updated: January 2025
 
 ---
 
@@ -39,15 +39,23 @@ The **Business Analysis HR Agent** is an AI-powered data-analysis platform that 
 Readers are expected to be comfortable with Python 3.10+, virtual environments, and containerised deployments.
 
 ## Recent Updates
+* **Multi-Modal Analysis** - Added Smart Analysis page with PandasAI integration for enhanced reasoning
+* **Excel Multi-Sheet Support** - Comprehensive Excel file processing with intelligent sheet selection and column indexing
+* **Advanced Monitoring** - Real-time health monitoring dashboard with metrics collection
+* **System Prompt Management** - Dynamic prompt customization for different analysis styles
+* **Enhanced Error Recovery** - Improved error handling with automatic retry mechanisms
 * **DOCX Export Feature** - Added comprehensive DOCX download functionality for all text and data exports using python-docx library
 
 ## Conceptual Overview
-The application follows a **multi-agent micro-kernel** pattern:
+The application follows a **multi-agent micro-kernel** pattern with enhanced capabilities:
 * **Memory Agent** – retrieves and stores column descriptions, manages system prompts, and maintains conversation context.
 * **Insight Agent** – surfaces descriptive statistics & data summaries.
 * **Code Generation Agents** – translate NL queries into Python/SQL, select between plotting and analysis code, and orchestrate prompt context.
 * **Execution Agent** – runs generated code in a sandbox, validates code, and supports dual-output (plot + data) contract.
 * **Reasoning Agent** – streams explanations and results back to the UI, curates business insights, and handles error explanations.
+* **Sheet Selection Agent** – intelligently selects and processes Excel sheets based on user queries.
+* **Column Indexer Agent** – creates semantic layer for Excel column mapping and analysis.
+* **Smart Analysis Agent** – leverages PandasAI for enhanced reasoning and natural language data exploration.
 
 This loose coupling allows independent scaling and rapid iteration.
 
@@ -56,23 +64,45 @@ This loose coupling allows independent scaling and rapid iteration.
 graph LR
     subgraph "Frontend"
         A(Streamlit UI)
+        B[Navigation System]
+        C[Multi-Page Interface]
+    end
+
+    subgraph "Analysis Pages"
+        D[CSV Analysis]
+        E[Excel Analysis]
+        F[Smart Analysis]
+        G[System Prompt Manager]
+        H[Monitoring Dashboard]
     end
 
     subgraph "AI Agents"
-        B[Memory]
-        C[Insight]
-        D[CodeGen]
-        E[Execution]
-        F[Reasoning]
+        I[Memory]
+        J[Insight]
+        K[CodeGen]
+        L[Execution]
+        M[Reasoning]
+        N[Sheet Selection]
+        O[Column Indexer]
+        P[Smart Analysis]
     end
 
     A --> B
-    A --> C
-    B --> D
+    B --> C
     C --> D
-    D --> E
-    E --> F
-    F --> A
+    C --> E
+    C --> F
+    C --> G
+    C --> H
+    D --> I
+    E --> N
+    E --> O
+    F --> P
+    I --> K
+    J --> K
+    K --> L
+    L --> M
+    M --> A
 ```
 
 ### Key Packages
@@ -80,7 +110,7 @@ graph LR
 |------|----------------|
 | `agents/` | Agent implementations & coordination |
 | `app_core/` | Generic API wrappers & helper functions |
-| `utils/` | Cross-cutting utilities (logging, retries, cache, circuit breaker, health, metrics, navigation, system prompts, plot helpers) |
+| `utils/` | Cross-cutting utilities (logging, retries, cache, circuit breaker, health, metrics, navigation, system prompts, plot helpers, docx utils, excel handling) |
 | `pages/` | Streamlit page controllers |
 
 ## Environment Setup
@@ -97,6 +127,8 @@ $ pip install -r requirements.txt
 
 # Export secrets
 $ export NVIDIA_API_KEY="<your-key>"
+$ export AZURE_API_KEY="<your-azure-key>"
+$ export AZURE_ENDPOINT="<your-azure-endpoint>"
 ```
 
 ## Configuration
@@ -104,7 +136,11 @@ All runtime settings are centralised in environment variables. See **Configurati
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NVIDIA_API_KEY` | Auth key for model endpoint | — |
+| `NVIDIA_API_KEY` | Auth key for NVIDIA model endpoint | — |
+| `AZURE_API_KEY` | Auth key for Azure OpenAI endpoint | — |
+| `AZURE_ENDPOINT` | Azure OpenAI endpoint URL | — |
+| `AZURE_API_VERSION` | Azure API version | `2024-02-15-preview` |
+| `AZURE_DEPLOYMENT_NAME` | Azure deployment name | `gpt-4` |
 | `STREAMLIT_SERVER_PORT` | Local dev port | `8501` |
 | `LOG_LEVEL` | Python logging level | `INFO` |
 | `LOG_FILE` | Log file path | `data_analysis_agent.log` |
@@ -113,29 +149,65 @@ All runtime settings are centralised in environment variables. See **Configurati
 
 ## Project Structure
 ```text
-data-analysis-agent/
+HR-Agent/
 ├── agents/            # AI agent definitions
+│   ├── base_agent.py
+│   ├── code_generation.py
+│   ├── execution.py
+│   ├── reasoning.py
+│   ├── memory.py
+│   ├── data_analysis.py
+│   ├── excel_agents.py
+│   ├── excel_code_generation.py
+│   ├── excel_execution.py
+│   ├── sheet_selection.py
+│   ├── coordinator.py
+│   ├── error_recovery.py
+│   ├── factory.py
+│   └── code_templates.py
 ├── app_core/          # Core business logic & helpers
 ├── pages/             # Streamlit UI pages
-├── utils/             # Shared utilities (retry, cache, circuit breaker, health, metrics, navigation, system prompts, plot helpers, docx utils)
+│   ├── data_analysis.py
+│   ├── excel_analysis.py
+│   ├── smart_analysis.py
+│   ├── system_prompt_manager.py
+│   └── monitoring.py
+├── utils/             # Shared utilities
+│   ├── plot_helpers.py
+│   ├── navigation.py
+│   ├── metrics.py
+│   ├── health_monitor.py
+│   ├── cache.py
+│   ├── circuit_breaker.py
+│   ├── logging_config.py
+│   ├── system_prompts.py
+│   ├── docx_utils.py
+│   ├── excel_error_handling.py
+│   ├── excel_performance.py
+│   ├── excel_query_engine.py
+│   ├── plot_quality_system.py
+│   └── retry_utils.py
 ├── tests/             # Pytest suite
 └── streamlit_app.py   # Entrypoint
 ```
 
 ## Application Layers
-1. **Presentation** – Streamlit pages & widgets, navigation registry.
+1. **Presentation** – Streamlit pages & widgets, navigation registry with multi-page interface.
 2. **Orchestration** – `agents.execution` coordinates agent calls, circuit breaker and retry logic for resilience.
 3. **Domain Logic** – `app_core.helpers` & `app_core.api` provide data-wrangling helpers.
 4. **Infrastructure** – `utils.*` offers logging, circuit breakers, retries, caching, health monitoring, metrics, and system prompt management.
 
 ## Data-Flow Walkthrough
-1. **Upload CSV** → persisted to session cache.
+1. **Upload CSV/Excel** → persisted to session cache with format-specific processing.
 2. **Natural query** sent to **Memory Agent** for context retrieval (column descriptions, conversation, system prompt).
 3. **Insight Agent** produces schema & stats.
-4. Combined prompt feeds **CodeGen Agents** (QueryUnderstandingTool, PlotCodeGeneratorTool, CodeWritingTool, CodeGenerationAgent).
-5. Generated code executed in **Execution Agent** inside `exec_safe` sandbox, with code validation and dual-output (fig, data_df) support.
-6. Results streamed to UI while **Reasoning Agent** explains steps and business context.
-7. Caching, metrics, and health monitoring run in the background for performance and reliability.
+4. **Sheet Selection Agent** (Excel only) intelligently selects relevant sheets.
+5. **Column Indexer Agent** (Excel only) creates semantic layer for column mapping.
+6. Combined prompt feeds **CodeGen Agents** (QueryUnderstandingTool, PlotCodeGeneratorTool, CodeWritingTool, CodeGenerationAgent).
+7. Generated code executed in **Execution Agent** inside `exec_safe` sandbox, with code validation and dual-output (fig, data_df) support.
+8. Results streamed to UI while **Reasoning Agent** explains steps and business context.
+9. **Smart Analysis Agent** (optional) provides enhanced reasoning using PandasAI.
+10. Caching, metrics, and health monitoring run in the background for performance and reliability.
 
 ## Agent & API Reference
 ### `agents/code_generation.py`
@@ -167,15 +239,31 @@ data-analysis-agent/
 - `smart_date_parser(df, column_name)` – Robust date parsing utility.
 - `extract_first_code_block(text: str) -> str` – Extracts first Python code block from markdown.
 
+### `agents/excel_agents.py`
+- `SheetCatalogAgent` – Catalogs and describes Excel sheets for intelligent selection.
+- `ColumnIndexerAgent` – Creates semantic layer for Excel column mapping and analysis.
+- `SheetSelectionAgent` – Intelligently selects relevant Excel sheets based on user queries.
+- `DisambiguationQuestion` – Handles ambiguous sheet/column references.
+
+### `agents/excel_code_generation.py`
+- `ExcelCodeGenerationAgent` – Specialized code generation for Excel multi-sheet analysis.
+- `ExcelExecutionAgent` – Executes Excel-specific code with sheet context.
+
+### `agents/sheet_selection.py`
+- `SheetPlan` – Represents analysis plan for Excel sheets.
+- `ColumnRef` – References to Excel columns with sheet context.
+
 ## Error Handling & Resilience
 - **Retry utils** (`utils/retry_utils.py`) with exponential backoff for LLM and column analysis calls.
 - **Circuit breaker** (`utils/circuit_breaker.py`) for LLM API and code execution, with configurable thresholds and recovery.
+- **Excel error handling** (`utils/excel_error_handling.py`) for robust Excel file processing.
 - **Graceful degradation** – UI surfaces friendly errors & traceback links, and agents provide actionable error tips.
 
 ## Logging & Monitoring
 - Structured logging via `utils/logging_config.py`, with environment-based configuration and log rotation.
 - **Prometheus-style metrics** via `utils/metrics.py` (API calls, code execution, error rates, system health).
 - **Health monitoring** in `utils/health_monitor.py` (CPU, memory, disk, process, API connectivity), with background thread and exportable reports.
+- **Real-time monitoring dashboard** in `pages/monitoring.py` with system health, performance metrics, and cache management.
 
 ## Caching & Performance
 - **Intelligent caching** (`utils/cache.py`):
@@ -185,6 +273,7 @@ data-analysis-agent/
   - Parallel column analysis (ThreadPoolExecutor)
   - Dual-output contract for plots (fig, data_df) for instant download/export
   - Session and persistent caches for repeated queries
+  - Excel performance monitoring (`utils/excel_performance.py`)
 
 ## Export & Download Features
 - **DOCX Export** (`utils/docx_utils.py`):
@@ -198,6 +287,7 @@ data-analysis-agent/
 - Unit tests in `tests/` executed with `pytest`.
 - **Integration test**: `tests/test_integration.py` loads a small CSV and runs an end-to-end query.
 - Plot helper tests in `tests/test_plot_helpers.py`.
+- Phase 3 feature tests in `tests/test_phase3_features.py`.
 
 Run locally:
 ```bash
@@ -208,12 +298,12 @@ pytest -q
 ### Docker (recommended)
 ```bash
 docker build -t hr-agent:latest .
-docker run -p 8501:8501 -e NVIDIA_API_KEY=xxx hr-agent:latest
+docker run -p 8501:8501 -e NVIDIA_API_KEY=xxx -e AZURE_API_KEY=xxx hr-agent:latest
 ```
 
 ### Streamlit Community Cloud
 1. Fork repo & connect to Streamlit Cloud.
-2. Set `NVIDIA_API_KEY` secret.
+2. Set `NVIDIA_API_KEY` and `AZURE_API_KEY` secrets.
 3. Deploy `streamlit_app.py`.
 
 ## Scalability & Performance
@@ -222,12 +312,14 @@ docker run -p 8501:8501 -e NVIDIA_API_KEY=xxx hr-agent:latest
 - GPU inference endpoint autoscaled based on QPS.
 - Use **chunked streaming** to keep UI responsive.
 - Circuit breaker and retry logic for all external API calls.
+- Excel performance monitoring and memory cleanup.
 
 ## Security Considerations
 - All data processed **in-memory** – nothing written to disk.
 - Frontend protected by password (basic HTTP auth can be added for prod).
 - Secrets injected via env vars, never committed.
 - Audit logging and session management for traceability.
+- Excel file validation and sanitization.
 
 ## Contribution Guidelines
 - Follow **PEP 8** & **Black** formatting (`black .`).
@@ -245,7 +337,10 @@ docker run -p 8501:8501 -e NVIDIA_API_KEY=xxx hr-agent:latest
 | **Persistent Cache** | On-disk cache for results that survive restarts. |
 | **Health Monitor** | Background system for resource and API diagnostics. |
 | **Metrics Collector** | Tracks API, code, and error events for performance. |
+| **Sheet Selection** | Intelligent Excel sheet selection based on user queries. |
+| **Column Indexing** | Semantic layer for Excel column mapping and analysis. |
+| **Smart Analysis** | Enhanced reasoning using PandasAI integration. |
 
 ---
 
-> Documentation created following best practices outlined in [“Creating a Technical Manual”](https://document360.com/blog/technical-manual/) [[source](https://document360.com/blog/technical-manual/)].
+> Documentation created following best practices outlined in ["Creating a Technical Manual"](https://document360.com/blog/technical-manual/) [[source](https://document360.com/blog/technical-manual/)].

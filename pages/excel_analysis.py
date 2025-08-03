@@ -2,7 +2,7 @@
 
 This page provides functionality for uploading and analyzing Excel files with multiple sheets,
 including sheet cataloging, column indexing, and semantic layer management.
-Enhanced with Phase 3: Resilience & Polish features.
+Enhanced with Phase 3: Resilience & Polish features and Phase 1/2 plot enhancements.
 """
 
 import io
@@ -10,6 +10,7 @@ import logging
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import matplotlib
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -21,9 +22,15 @@ from agents import (
 )
 from agents.memory import SystemPromptMemoryAgent
 from utils.system_prompts import get_prompt_manager
-from app_core.api import make_llm_call
+from app_core.api import make_llm_call, get_available_models
 from utils.excel_error_handling import ExcelErrorHandler
 from utils.excel_performance import PerformanceMonitor, memory_cleanup
+# Import Phase 1 and Phase 2 plot enhancements
+from utils.plot_helpers import (
+    PlotMemory, is_plot_modification_request, generate_plot_modification_code,
+    create_enhanced_chart_with_insights, detect_insights, add_insight_annotations,
+    get_hr_specific_colors, get_contextual_colors, apply_modern_styling
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +40,45 @@ def render_system_prompt_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎯 AI Behavior")
     
+    # Model Selection
+    st.sidebar.markdown("**🤖 AI Model:**")
+    available_models = get_available_models()
+    
+    if not available_models:
+        st.sidebar.error("❌ No AI models available. Please check your API configuration.")
+        return
+    
+    # Initialize model selection in session state
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = list(available_models.keys())[0]  # Default to first available
+    
+    # Model selection dropdown
+    model_options = list(available_models.keys())
+    model_labels = [available_models[model] for model in model_options]
+    
+    current_model_index = model_options.index(st.session_state.selected_model) if st.session_state.selected_model in model_options else 0
+    
+    selected_model_key = st.sidebar.selectbox(
+        "Choose AI Model:",
+        options=model_options,
+        format_func=lambda x: available_models[x],
+        index=current_model_index,
+        help="Select which AI model to use for analysis"
+    )
+    
+    # Update session state if selection changed
+    if selected_model_key != st.session_state.selected_model:
+        st.session_state.selected_model = selected_model_key
+        st.sidebar.success(f"✅ Switched to {available_models[selected_model_key]}")
+        st.rerun()
+    
+    # Show current model info
+    current_model_name = available_models.get(st.session_state.selected_model, "Unknown")
+    st.sidebar.info(f"🤖 Active Model: **{current_model_name}**")
+    
+    st.sidebar.markdown("---")
+    
+    # System Prompt Selection
     prompt_manager = get_prompt_manager()
     system_prompt_agent = SystemPromptMemoryAgent()
     
@@ -437,6 +483,33 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
     if "excel_disambiguation" not in st.session_state:
         st.session_state.excel_disambiguation = None
     
+    # Initialize plot memory system for Phase 2 enhancements
+    if "excel_plot_memory" not in st.session_state:
+        st.session_state.excel_plot_memory = PlotMemory()
+    
+    # Add plot enhancement controls to sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🎨 Excel Plot Enhancements")
+    
+    # Theme selection
+    excel_plot_theme = st.sidebar.selectbox(
+        "Excel Plot Theme:",
+        options=['professional', 'modern', 'minimal', 'elegant'],
+        index=0,
+        help="Choose the visual style for your Excel plots"
+    )
+    
+    # Insight detection toggle
+    excel_show_insights = st.sidebar.checkbox(
+        "🔍 Auto-detect Excel Insights",
+        value=True,
+        help="Automatically detect and highlight key insights in Excel plots"
+    )
+    
+    # Store settings in session state
+    st.session_state.excel_plot_theme = excel_plot_theme
+    st.session_state.excel_show_insights = excel_show_insights
+    
     # Display chat history
     chat_container = st.container()
     with chat_container:
@@ -477,34 +550,22 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                     
                     with col1 if not has_data else col2:
                         # Download text response
+                        # Extract clean text from the response (remove HTML)
                         import re
                         clean_text = re.sub(r'<[^>]+>', '', msg["content"])
                         clean_text = re.sub(r'\n+', '\n', clean_text).strip()
                         
                         if clean_text:
-                            # Create two columns for text download options
-                            txt_col, docx_col = st.columns(2)
-                            
-                            with txt_col:
-                                st.download_button(
-                                    label="📄 TXT",
-                                    data=clean_text,
-                                    file_name=f"excel_analysis_response_{i+1}.txt",
-                                    mime="text/plain",
-                                    use_container_width=True
-                                )
-                            
-                            with docx_col:
-                                # Convert to DOCX
-                                from utils.docx_utils import text_to_docx
-                                docx_data = text_to_docx(clean_text, title=f"Excel Analysis Response {i+1}")
-                                st.download_button(
-                                    label="📝 DOCX",
-                                    data=docx_data,
-                                    file_name=f"excel_analysis_response_{i+1}.docx",
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    use_container_width=True
-                                )
+                            # Convert to DOCX
+                            from utils.docx_utils import text_to_docx
+                            docx_data = text_to_docx(clean_text, title=f"Excel Analysis Response {i+1}")
+                            st.download_button(
+                                label="📝 DOCX",
+                                data=docx_data,
+                                file_name=f"excel_analysis_response_{i+1}.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                use_container_width=True
+                            )
                     
                     # Download CSV data if available (dual-output only)
                     if has_data and col4:
@@ -513,34 +574,18 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                             if 0 <= data_idx < len(st.session_state.get("excel_plot_data", [])):
                                 data_df = st.session_state.excel_plot_data[data_idx]
                                 
-                                # Create two columns for data download options
-                                csv_col, docx_col = st.columns(2)
+                                # Convert DataFrame to CSV
+                                csv_buffer = io.StringIO()
+                                data_df.to_csv(csv_buffer, index=False)
+                                csv_data = csv_buffer.getvalue()
                                 
-                                with csv_col:
-                                    # Convert DataFrame to CSV
-                                    csv_buffer = io.StringIO()
-                                    data_df.to_csv(csv_buffer, index=False)
-                                    csv_data = csv_buffer.getvalue()
-                                    
-                                    st.download_button(
-                                        label="📊 CSV",
-                                        data=csv_data,
-                                        file_name=f"excel_plot_data_{i+1}.csv",
-                                        mime="text/csv",
-                                        use_container_width=True
-                                    )
-                                
-                                with docx_col:
-                                    # Convert DataFrame to DOCX table
-                                    from utils.docx_utils import dataframe_to_docx_table
-                                    docx_data = dataframe_to_docx_table(data_df, title=f"Excel Plot Data {i+1}")
-                                    st.download_button(
-                                        label="📝 DOCX",
-                                        data=docx_data,
-                                        file_name=f"excel_plot_data_{i+1}.docx",
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                        use_container_width=True
-                                    )
+                                st.download_button(
+                                    label="📊 CSV",
+                                    data=csv_data,
+                                    file_name=f"excel_plot_data_{i+1}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
                     
                     # Download plot if available
                     plot_col = col4 if has_data else col3
@@ -677,16 +722,44 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                             # Handle new dual-output format (fig, data_content)
                             fig, data_content = result
                             
-                            # Store plot
+                            # Store plot in session state
                             st.session_state.excel_plots.append(fig)
                             plot_idx = len(st.session_state.excel_plots) - 1
+                            
+                            # Store in plot memory system for Phase 2 enhancements
+                            excel_plot_theme = getattr(st.session_state, 'excel_plot_theme', 'professional')
+                            excel_show_insights = getattr(st.session_state, 'excel_show_insights', True)
+                            
+                            # Detect chart type from the plot
+                            chart_type = 'bar'  # Default, could be enhanced with better detection
+                            if hasattr(fig, 'axes') and fig.axes:
+                                ax = fig.axes[0]
+                                if len(ax.get_children()) > 0:
+                                    # Simple chart type detection
+                                    children = ax.get_children()
+                                    if any(isinstance(child, matplotlib.patches.Rectangle) for child in children):
+                                        chart_type = 'bar'
+                                    elif any(isinstance(child, matplotlib.lines.Line2D) for child in children):
+                                        chart_type = 'line'
+                                    elif any(isinstance(child, matplotlib.collections.PathCollection) for child in children):
+                                        chart_type = 'scatter'
                             
                             # Handle different data content types
                             if isinstance(data_content, pd.DataFrame):
                                 # Single DataFrame
                                 st.session_state.excel_plot_data.append(data_content)
                                 data_idx = len(st.session_state.excel_plot_data) - 1
-                                logger.info(f"📊 Dual-output added: plot at index {plot_idx}, data at index {data_idx} ({len(data_content)} rows)")
+                                
+                                # Add to Excel plot memory
+                                memory_idx = st.session_state.excel_plot_memory.add_plot(
+                                    fig=fig,
+                                    data_df=data_content,
+                                    context=user_q,
+                                    chart_type=chart_type,
+                                    styling={'theme': excel_plot_theme, 'insights': excel_show_insights}
+                                )
+                                
+                                logger.info(f"📊 Enhanced Excel plot added: plot at index {plot_idx}, data at index {data_idx}, memory at {memory_idx} ({len(data_content)} rows)")
                             elif isinstance(data_content, dict):
                                 # Dictionary of DataFrames - combine them into a single DataFrame for display
                                 combined_data = []
@@ -701,7 +774,17 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                                     combined_df = pd.concat(combined_data, ignore_index=True)
                                     st.session_state.excel_plot_data.append(combined_df)
                                     data_idx = len(st.session_state.excel_plot_data) - 1
-                                    logger.info(f"📊 Dual-output added: plot at index {plot_idx}, combined data at index {data_idx} ({len(combined_df)} total rows)")
+                                    
+                                    # Add to Excel plot memory
+                                    memory_idx = st.session_state.excel_plot_memory.add_plot(
+                                        fig=fig,
+                                        data_df=combined_df,
+                                        context=user_q,
+                                        chart_type=chart_type,
+                                        styling={'theme': excel_plot_theme, 'insights': excel_show_insights}
+                                    )
+                                    
+                                    logger.info(f"📊 Enhanced Excel plot added: plot at index {plot_idx}, combined data at index {data_idx}, memory at {memory_idx} ({len(combined_df)} total rows)")
                                 else:
                                     data_idx = None
                                     logger.info(f"📊 Dual-output added: plot at index {plot_idx}, no data to store")

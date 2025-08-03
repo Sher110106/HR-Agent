@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import re
 
 from agents.data_analysis import smart_date_parser
 
@@ -39,6 +40,76 @@ def validate_pandas_code(code: str) -> tuple[list, str]:
     # Fix unsafe DataFrame slicing
     if "[df[" in code and ".copy()" not in code and "=" in code:
         warnings.append("🔧 Auto-suggestion: Consider using .copy() when creating DataFrame subsets to avoid warnings")
+    
+    # CRITICAL: Fix pd.cut binning errors
+    
+    # Pattern to match pd.cut with bins and labels
+    cut_pattern = r'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*(\[[^\]]+\])\s*,\s*labels\s*=\s*(\[[^\]]+\])'
+    matches = re.findall(cut_pattern, code)
+    
+    for match in matches:
+        try:
+            # Parse bins and labels
+            bins_str = match[1]
+            labels_str = match[2]
+            
+            # Count bins and labels
+            bins_count = len(eval(bins_str))  # Safe since we're parsing our own code
+            labels_count = len(eval(labels_str))
+            
+            if labels_count != bins_count - 1:
+                warnings.append(f"🔧 CRITICAL: Fixed pd.cut binning error - labels count ({labels_count}) must equal bins count ({bins_count}) - 1")
+                
+                # Fix the code by either removing labels or adjusting them
+                if labels_count > bins_count - 1:
+                    # Too many labels, remove the extra ones
+                    new_labels = eval(labels_str)[:bins_count-1]
+                    new_labels_str = str(new_labels)
+                    corrected_code = corrected_code.replace(labels_str, new_labels_str)
+                else:
+                    # Too few labels, use automatic binning without labels
+                    corrected_code = re.sub(
+                        r'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*(\[[^\]]+\])\s*,\s*labels\s*=\s*(\[[^\]]+\])',
+                        r'pd.cut(\1, bins=\2)',  # Remove labels parameter
+                        corrected_code
+                    )
+                    
+        except Exception as e:
+            warnings.append(f"⚠️ Could not parse pd.cut parameters: {e}")
+    
+    # Also check for pd.cut with mismatched bin edges and labels in different patterns
+    # Pattern for pd.cut with separate bin definitions
+    cut_separate_pattern = r'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*([^,]+)\s*,\s*labels\s*=\s*([^,)]+)'
+    separate_matches = re.findall(cut_separate_pattern, code)
+    
+    for match in separate_matches:
+        try:
+            bins_var = match[1].strip()
+            labels_var = match[2].strip()
+            
+            # Look for bin and label definitions in the code
+            bins_def_pattern = rf'{bins_var}\s*=\s*(\[[^\]]+\])'
+            labels_def_pattern = rf'{labels_var}\s*=\s*(\[[^\]]+\])'
+            
+            bins_match = re.search(bins_def_pattern, code)
+            labels_match = re.search(labels_def_pattern, code)
+            
+            if bins_match and labels_match:
+                bins_count = len(eval(bins_match.group(1)))
+                labels_count = len(eval(labels_match.group(1)))
+                
+                if labels_count != bins_count - 1:
+                    warnings.append(f"🔧 CRITICAL: Fixed pd.cut binning error in variable definitions - labels count ({labels_count}) must equal bins count ({bins_count}) - 1")
+                    
+                    # Fix by removing labels parameter
+                    corrected_code = re.sub(
+                        rf'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*{bins_var}\s*,\s*labels\s*=\s*{labels_var}',
+                        rf'pd.cut(\1, bins={bins_var}',
+                        corrected_code
+                    )
+                    
+        except Exception as e:
+            warnings.append(f"⚠️ Could not parse separate pd.cut parameters: {e}")
     
     return warnings, corrected_code
 
@@ -80,7 +151,7 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
                 create_clean_bar_chart, create_clean_line_chart, create_clean_scatter_plot,
                 create_clean_histogram, create_clean_box_plot, create_clean_heatmap, 
                 create_clean_pie_chart, add_value_labels, smart_categorical_plot, handle_seaborn_warnings,
-                smart_annotate_points
+                smart_annotate_points, safe_binning
             )
             env["format_axis_labels"] = format_axis_labels
             env["apply_professional_styling"] = apply_professional_styling 
@@ -88,6 +159,7 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
             env["safe_color_access"] = safe_color_access
             env["create_category_palette"] = create_category_palette
             env["optimize_figure_size"] = optimize_figure_size
+            env["safe_binning"] = safe_binning
             env["create_clean_bar_chart"] = create_clean_bar_chart
             env["create_clean_line_chart"] = create_clean_line_chart
             env["create_clean_scatter_plot"] = create_clean_scatter_plot
@@ -155,5 +227,14 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
             error_msg += f"\n💡 Tip: Use .copy() when creating DataFrame subsets or .loc[] for safe assignments"
         elif "'int' object has no attribute" in str(exc):
             error_msg += f"\n💡 Tip: Check your method chaining - you may be calling a method on an integer instead of a pandas object"
+        elif "Bin labels must be one fewer than the number of bin edges" in str(exc):
+            error_msg += f"\n💡 CRITICAL: pd.cut() binning error detected. The number of labels must equal the number of bins minus 1."
+            error_msg += f"\n💡 Example: bins=[0,1,3,5] (4 bins) needs labels=['0-1','1-3','3-5'] (3 labels)"
+            error_msg += f"\n💡 Fix: Use automatic binning without labels: pd.cut(df['col'], bins=5)"
+            error_msg += f"\n💡 Or ensure labels count = bins count - 1"
+        elif "bin edges" in str(exc).lower():
+            error_msg += f"\n💡 Binning error detected. Check your pd.cut() or pd.qcut() parameters."
+            error_msg += f"\n💡 For automatic binning: pd.cut(df['col'], bins=5)"
+            error_msg += f"\n💡 For custom bins: ensure labels count = bins count - 1"
         
         return error_msg 

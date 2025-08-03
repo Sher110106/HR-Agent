@@ -2,42 +2,148 @@ import os
 import logging
 from typing import List, Dict, Any, Tuple
 from openai import AzureOpenAI
+import google.generativeai as genai
 
 from utils.metrics import api_call_timer, code_execution_timer, record_error
 from utils.circuit_breaker import (
     llm_api_breaker, code_execution_breaker, CircuitBreakerError
 )
+from env_config import (
+    AZURE_API_KEY, AZURE_ENDPOINT, AZURE_API_VERSION, AZURE_DEPLOYMENT_NAME,
+    GEMINI_API_KEY
+)
 
 logger = logging.getLogger(__name__)
 
-# Initialize client
-api_key = os.environ.get("Azure_Key")
-if not api_key:
-    raise EnvironmentError("Azure_Key environment variable not set. Please export Azure_Key with your Azure OpenAI API key.")
+# Model configuration
+SUPPORTED_MODELS = {
+    "gpt-4.1": "azure_openai",
+    "gemini-2.5-pro": "google_genai"
+}
 
-AZURE_DEPLOYMENT_NAME = "gpt-4.1"  # Default Azure OpenAI deployment
-AZURE_ENDPOINT = "https://ai-sherpartap11019601ai587562462851.openai.azure.com"  # No trailing slash after domain
-AZURE_API_VERSION = "2025-01-01-preview"
+# Initialize Azure OpenAI client
+azure_client = None
+if AZURE_API_KEY:
+    try:
+        azure_client = AzureOpenAI(
+            azure_endpoint=AZURE_ENDPOINT,
+            api_key=AZURE_API_KEY,
+            api_version=AZURE_API_VERSION
+        )
+        logger.info("✅ Azure OpenAI client initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Azure OpenAI client: {e}")
+else:
+    logger.warning("AZURE_API_KEY environment variable not set. Azure OpenAI will not be available.")
 
-# Use AzureOpenAI client which knows how to build resource URLs internally
-client = AzureOpenAI(
-    azure_endpoint=AZURE_ENDPOINT,
-    api_key=api_key,
-    api_version=AZURE_API_VERSION
-)
+# Initialize Google Generative AI client
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        logger.info("✅ Google Gemini client initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Google Gemini client: {e}")
+else:
+    logger.warning("GEMINI_API_KEY environment variable not set. Gemini will not be available.")
 
-def make_llm_call(messages: List[Dict], model: str = AZURE_DEPLOYMENT_NAME, 
+def _make_azure_openai_call(messages: List[Dict], model: str, temperature: float, max_tokens: int, stream: bool):
+    """Make Azure OpenAI API call."""
+    if not azure_client:
+        raise EnvironmentError("Azure OpenAI client not initialized. Please set AZURE_API_KEY environment variable.")
+    
+    return azure_client.chat.completions.create(
+        model=AZURE_DEPLOYMENT_NAME,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=stream
+    )
+
+def _make_gemini_call(messages: List[Dict], model: str, temperature: float, max_tokens: int, stream: bool):
+    """Make Google Gemini API call."""
+    # Convert OpenAI format messages to Gemini format
+    gemini_messages = []
+    system_instruction = None
+    
+    for msg in messages:
+        role = msg.get('role', '')
+        content = msg.get('content', '')
+        
+        if role == 'system':
+            system_instruction = content
+        elif role == 'user':
+            gemini_messages.append({
+                'role': 'user',
+                'parts': [{'text': content}]
+            })
+        elif role == 'assistant':
+            gemini_messages.append({
+                'role': 'model',
+                'parts': [{'text': content}]
+            })
+    
+    # Create Gemini model
+    gemini_model = genai.GenerativeModel(
+        model_name=model,
+        system_instruction=system_instruction
+    )
+    
+    # Generate content
+    generation_config = genai.types.GenerationConfig(
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+    )
+    
+    # If we only have a single user message, pass it directly as a string for simpler handling
+    if len(gemini_messages) == 1 and gemini_messages[0]['role'] == 'user':
+        content_to_send = gemini_messages[0]['parts'][0]['text']
+    else:
+        content_to_send = gemini_messages
+    
+    if stream:
+        response = gemini_model.generate_content(
+            content_to_send,
+            generation_config=generation_config,
+            stream=True
+        )
+    else:
+        response = gemini_model.generate_content(
+            content_to_send,
+            generation_config=generation_config
+        )
+    
+    return response
+
+def make_llm_call(messages: List[Dict], model: str = None, 
                   temperature: float = 0.2, max_tokens: int = 4000, stream: bool = False):
     """Make LLM API call with circuit breaker protection and metrics tracking."""
     
+    # If no model specified, try to get from session state (for Streamlit apps)
+    if model is None:
+        try:
+            import streamlit as st
+            if hasattr(st, 'session_state') and hasattr(st.session_state, 'selected_model'):
+                model = st.session_state.selected_model
+                logger.debug(f"🎯 Using model from session state: {model}")
+            else:
+                model = AZURE_DEPLOYMENT_NAME  # fallback to default
+                logger.debug(f"🎯 Using default model: {model}")
+        except ImportError:
+            model = AZURE_DEPLOYMENT_NAME  # fallback if not in Streamlit context
+            logger.debug(f"🎯 Using default model (no Streamlit): {model}")
+    
+    # Determine which provider to use
+    provider = SUPPORTED_MODELS.get(model)
+    if not provider:
+        raise ValueError(f"Unsupported model: {model}. Supported models: {list(SUPPORTED_MODELS.keys())}")
+    
     def api_call():
-        return client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=stream
-        )
+        if provider == "azure_openai":
+            return _make_azure_openai_call(messages, model, temperature, max_tokens, stream)
+        elif provider == "google_genai":
+            return _make_gemini_call(messages, model, temperature, max_tokens, stream)
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
     
     try:
         with api_call_timer() as timer:
@@ -51,16 +157,32 @@ def make_llm_call(messages: List[Dict], model: str = AZURE_DEPLOYMENT_NAME,
                 # Set an estimated token count that will be updated when streaming finishes
                 timer.set_tokens_used(prompt_tokens)
                 logger.debug(f"🤖 LLM streaming call started: ~{prompt_tokens} prompt tokens, model: {model}")
+                
+                # For Gemini streaming, we need to wrap the response
+                if provider == "google_genai":
+                    return _wrap_gemini_streaming_response(response)
+                return response
             else:
-                if hasattr(response, 'usage') and response.usage:
-                    total_tokens = response.usage.total_tokens
+                # Handle token counting based on provider
+                if provider == "azure_openai":
+                    if hasattr(response, 'usage') and response.usage:
+                        total_tokens = response.usage.total_tokens
+                    else:
+                        total_tokens = prompt_tokens + (max_tokens // 4)  # Rough estimate
+                elif provider == "google_genai":
+                    # Gemini doesn't provide token usage in the same way
+                    response_text = getattr(response, 'text', '')
+                    total_tokens = prompt_tokens + len(response_text) // 4  # Rough estimate
                 else:
                     total_tokens = prompt_tokens + (max_tokens // 4)  # Rough estimate
                 
                 timer.set_tokens_used(total_tokens)
                 logger.debug(f"🤖 LLM call successful: {total_tokens} tokens, model: {model}")
-            
-            return response
+                
+                # For Gemini, we need to wrap the response to match OpenAI format
+                if provider == "google_genai":
+                    return _wrap_gemini_response(response)
+                return response
             
     except CircuitBreakerError as e:
         record_error("circuit_breaker_open", {"model": model, "error": str(e)})
@@ -70,6 +192,56 @@ def make_llm_call(messages: List[Dict], model: str = AZURE_DEPLOYMENT_NAME,
         record_error("llm_api_error", {"model": model, "error": str(e)})
         logger.error(f"❌ LLM API call failed: {e}")
         raise
+
+def _wrap_gemini_response(gemini_response):
+    """Wrap Gemini response to match OpenAI format."""
+    class MockChoice:
+        def __init__(self, text):
+            self.message = MockMessage(text)
+    
+    class MockMessage:
+        def __init__(self, text):
+            self.content = text
+    
+    class MockResponse:
+        def __init__(self, text):
+            self.choices = [MockChoice(text)]
+    
+    # Get text from Gemini response safely
+    response_text = getattr(gemini_response, 'text', '')
+    return MockResponse(response_text)
+
+def _wrap_gemini_streaming_response(gemini_stream):
+    """Wrap Gemini streaming response to match OpenAI format."""
+    class MockStreamChoice:
+        def __init__(self, text):
+            self.delta = MockDelta(text)
+    
+    class MockDelta:
+        def __init__(self, text):
+            self.content = text
+    
+    class MockStreamResponse:
+        def __init__(self, text):
+            self.choices = [MockStreamChoice(text)]
+    
+    for chunk in gemini_stream:
+        if chunk.text:
+            yield MockStreamResponse(chunk.text)
+
+def get_available_models():
+    """Get list of available models with their display names."""
+    available = {}
+    
+    # Check Azure OpenAI availability
+    if azure_client:
+        available["gpt-4.1"] = "GPT-4.1 (Azure OpenAI)"
+    
+    # Check Gemini availability
+    if GEMINI_API_KEY:
+        available["gemini-2.5-pro"] = "Gemini 2.5 Pro (Google)"
+    
+    return available
 
 def execute_code_safely(code: str, local_vars: Dict[str, Any]) -> Tuple[bool, Any, str]:
     """Execute code with circuit breaker protection and metrics tracking."""
