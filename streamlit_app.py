@@ -8,7 +8,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Global flag to prevent duplicate health monitoring threads
-_health_monitoring_started = False
+# Health monitoring removed
 
 def render_error_page(error_message: str, error_details: str = None):
     """Render a fallback error page when navigation fails."""
@@ -37,20 +37,8 @@ def render_error_page(error_message: str, error_details: str = None):
     """)
 
 def safe_initialize_monitoring():
-    """Safely initialize health monitoring with error handling."""
-    global _health_monitoring_started
-    
-    try:
-        if not _health_monitoring_started:
-            from utils.health_monitor import start_health_monitoring
-            start_health_monitoring()
-            _health_monitoring_started = True
-            logger.info("🚀 Enhanced Data Analysis Agent starting with monitoring systems")
-            return True
-    except Exception as e:
-        logger.error(f"Failed to initialize health monitoring: {e}")
-        st.warning("⚠️ Health monitoring could not be initialized. Some features may be limited.")
-        return False
+    """Health monitoring removed - this is now a no-op."""
+    logger.info("🚀 Enhanced Data Analysis Agent starting")
     return True
 
 def safe_get_navigation():
@@ -118,10 +106,7 @@ def main():
             # Add app status indicator
             with st.sidebar:
                 st.markdown("---")
-                if _health_monitoring_started:
-                    st.success("✅ Monitoring Active")
-                else:
-                    st.warning("⚠️ Limited Mode")
+                st.success("✅ Application Ready")
         
         except Exception as e:
             logger.error(f"Navigation UI error: {e}")

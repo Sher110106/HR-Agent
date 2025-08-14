@@ -72,7 +72,7 @@ Respond with only 'true' for any explicit or implicit visualization request. For
     return result
 
 
-def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "", memory_agent: ColumnMemoryAgent = None) -> str:
+def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, conversation_context: str = "", memory_agent: ColumnMemoryAgent = None, plot_engine: str = "plotly") -> str:
     """
     Generate a prompt for the LLM to write pandas+matplotlib code for a plot based on the query and columns.
     The generated code must return a tuple (fig, data_df):
@@ -122,10 +122,62 @@ def PlotCodeGeneratorTool(cols: List[str], query: str, df: pd.DataFrame, convers
     IMPORTANT - Date/Time Handling:
     - Detected date/time columns: {', '.join(date_columns)}
     - For date parsing, use: pd.to_datetime(df['column_name'], errors='coerce')
+    - You can use smart_date_parser(df, 'column_name') function (already available) or pd.to_datetime(df['column_name'], errors='coerce')
     """
     
     context_section = f"\nPrevious conversation context:\n{conversation_context}\n" if conversation_context else ""
     enhancement_note = "\n\nAI-generated column descriptions are available above. Use this context for more relevant visualizations." if memory_agent and memory_agent.has_descriptions() else ""
+    
+    # Determine plotting instructions based on engine
+    if plot_engine == "matplotlib":
+        engine_instructions = """
+REQUIREMENTS
+- Return a tuple (fig, data_df) where:
+    – fig is a matplotlib Figure object with professional styling
+    – data_df is the tidy DataFrame used to create the plot
+- Use matplotlib and seaborn for plotting (native matplotlib functions)
+- Create figure with: fig, ax = plt.subplots(figsize=(12, 8))
+- Apply professional styling manually"""
+        helper_functions = """
+    MATPLOTLIB HELPER UTILITIES:
+    – apply_professional_styling(ax, title, xlabel, ylabel)
+    – format_axis_labels(ax, x_rotation=45)
+    – get_professional_colors()['colors']
+    – safe_color_access(colors, index)
+    – create_category_palette(categories, palette_name='primary')
+    – optimize_figure_size(ax)
+    – add_value_labels(ax, label_mode="minimal")
+    – handle_seaborn_warnings()
+    – safe_binning(data, bins, labels=None, method='cut')
+    
+    Import from: from utils.plot_helpers import apply_professional_styling, get_professional_colors, etc."""
+    else:
+        engine_instructions = """
+REQUIREMENTS
+- Return a tuple (fig, data_df) where:
+    – fig is a SINGLE Plotly Figure (not multiple figures)
+    – data_df is the tidy DataFrame used to create the plot
+- For multiple charts, you can return:
+  * A list of figures: result = [fig1, fig2, fig3]
+  * A list of tuples: result = [(fig1, df1), (fig2, df2)]
+  * Or choose the MOST IMPORTANT one if space is limited
+- AXIS LABELS ARE MANDATORY: Always set clear X and Y axis titles. If you use Plotly directly, call:
+    fig.update_xaxes(title_text=xlabel or "X") and fig.update_yaxes(title_text=ylabel or "Y").
+  If you use our helper, pass xlabel and ylabel explicitly to ensure they appear.
+"""
+        helper_functions = """
+    CHART TYPE HELPERS (choose the most appropriate):
+    – create_clean_bar_chart(None, data_df, x_col, y_col, hue_col=None, title="", xlabel="", ylabel="", legend_totals=True)
+    – create_clean_line_chart(None, data_df, x_col, y_col, hue_col=None, title="", xlabel="", ylabel="", show_markers=True)
+    – create_clean_scatter_plot(None, data_df, x_col, y_col, hue_col=None, size_col=None, title="", xlabel="", ylabel="", add_trendline=False)
+    – create_clean_histogram(None, data_df, col, bins=30, title="", xlabel="", ylabel="Frequency", show_stats=True)
+    – create_clean_box_plot(None, data_df, x_col, y_col, title="", xlabel="", ylabel="", show_outliers=True)
+    – create_clean_violin_plot(None, data_df, x_col, y_col, title="", xlabel="", ylabel="")
+    – create_clean_pie_chart(None, data_df, col, title="", show_percentages=True, explode_max=True)
+    
+    IMPORTANT: These helpers return Plotly figures. ALWAYS pass None as the first parameter (ax).
+    Additionally, ALWAYS provide meaningful 'xlabel' and 'ylabel' arguments so axis titles are visible.
+    Import from: from utils.plot_migration_shims import create_clean_bar_chart, create_clean_line_chart, etc."""
     
     prompt = f"""
 Given DataFrame `df` with columns and data types:
@@ -134,22 +186,11 @@ Given DataFrame `df` with columns and data types:
 Write Python code using pandas, matplotlib (as plt) and seaborn (as sns) to answer:
 "{query}"
 
-REQUIREMENTS
-- Return a tuple (fig, data_df) where:
-    – fig is a matplotlib Figure with **professional styling**
-    – data_df is the tidy DataFrame used to create the plot
+{engine_instructions}
 - Use MINIMAL value labels only when truly helpful (avoid clutter)
 - **DO NOT** use plt.table / ax.table
-- Use ONLY these helper utilities:
-    – apply_professional_styling(ax, title, xlabel, ylabel)
-    – format_axis_labels(ax, x_rotation=45)
-    – get_professional_colors()['colors']
-    – safe_color_access(colors, index) # Safe color access with cycling
-    – create_category_palette(categories, palette_name='primary') # For seaborn category-specific palettes
-    – optimize_figure_size(ax)
-    – add_value_labels(ax, label_mode="minimal") # Use sparingly for key insights only
-    – handle_seaborn_warnings() # Call at start to suppress harmless seaborn warnings
-    – safe_binning(data, bins, labels=None, method='cut') # Safe binning with automatic validation
+
+{helper_functions}
     
     CRITICAL - PANDAS CUT/BINNING VALIDATION:
     - When using pd.cut(), ALWAYS ensure labels length = bins length - 1
@@ -163,6 +204,15 @@ REQUIREMENTS
       * Automatic: df['bins'] = safe_binning(df['col'], bins=5)
       * Custom bins: df['bins'] = safe_binning(df['col'], bins=[0,1,3,5], labels=['0-1','1-3','3-5'])
       * Equal frequency: df['bins'] = safe_binning(df['col'], bins=5, method='qcut')
+    - NOTE: pandas Interval objects from pd.cut() are automatically handled by safe_plotly_to_html() for JSON serialization
+    - PLOTLY THEMING: Use create_robust_plotly_chart() for proper theming and contrast
+    - PLOTLY EXAMPLES:
+      * Basic: fig = create_robust_plotly_chart(df, 'x_col', 'y_col', theme='auto')
+      * Custom: fig = create_robust_plotly_chart(df, 'x_col', 'y_col', chart_type='bar', variant='modern')
+      * Themed: fig = create_robust_plotly_chart(df, 'x_col', 'y_col', theme='dark', variant='professional')
+      * Multi-graph: result = [fig1, fig2, fig3] # Return list of figures with enhanced labels
+      * Multi-graph with data: result = [(fig1, df1), (fig2, df2)] # Return list of tuples
+      * Enhanced labels: Axis labels and legends are automatically improved for better readability
     
     SEABORN PALETTE GUIDANCE:
     - For category-specific colors: palette = create_category_palette(df['category_col'].unique())
@@ -178,18 +228,13 @@ REQUIREMENTS
     - For concatenation with different column structures, use pd.concat([df1, df2], ignore_index=True, sort=False)
     - Always assign your final result to the variable 'result' - this is critical!
     
-    CHART TYPE HELPERS (choose the most appropriate):
-    – create_clean_bar_chart(ax, data_df, x_col, y_col, hue_col=None, title="", xlabel="", ylabel="", legend_totals=True)
-    – create_clean_line_chart(ax, data_df, x_col, y_col, hue_col=None, title="", xlabel="", ylabel="", show_markers=True)
-    – create_clean_scatter_plot(ax, data_df, x_col, y_col, hue_col=None, size_col=None, title="", xlabel="", ylabel="", add_trendline=False)
-    – create_clean_histogram(ax, data_df, col, bins=30, title="", xlabel="", ylabel="Frequency", show_stats=True)
-    – create_clean_box_plot(ax, data_df, x_col, y_col, title="", xlabel="", ylabel="", show_outliers=True)
-    – create_clean_heatmap(ax, data_df, title="", cmap='RdYlBu_r', show_values=False)
-    – create_clean_pie_chart(ax, data_df, col, title="", show_percentages=True, explode_max=True)
-    – smart_categorical_plot(ax, data_df, x_col, y_col, plot_type="auto") # For categorical data with many points
-    – smart_annotate_points(ax, data_df, x_col, y_col, label_col, max_annotations=5) # Add smart annotations to scatter plots
+
 - Ensure the figure is aesthetically pleasing: grid, spines removed, legend with totals, tight layout
 - Assign the final tuple to `result`
+- CRITICAL: result can be:
+  * (single_figure, dataframe) - for single plots
+  * [fig1, fig2, fig3] - for multiple plots
+  * [(fig1, df1), (fig2, df2)] - for multiple plots with different data
 - Wrap code in a single ```python block with no extra text
 """
     logger.debug(f"Generated plot prompt: {prompt[:200]}...")
@@ -284,7 +329,7 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     Rules & Available Tools
     ----------------------
          1. Use pandas operations on `df` only - `pd`, `np`, and `df` are available in scope.
-    2. For date/time columns, prefer smart_date_parser(df, 'column_name') for robust parsing.
+    2. For date/time columns, use smart_date_parser(df, 'column_name') function (already available) or pd.to_datetime(df['column_name'], errors='coerce').
     3. For categorical columns (like Yes/No), convert to numeric first: df['col'].map({{'Yes': 1, 'No': 0}}).
     4. For correlation analysis, use df[['col1', 'col2']].corr().iloc[0, 1] for cleaner results.
     5. For groupby operations, use observed=True: df.groupby('col', observed=True) and handle missing values with .dropna() if needed.
@@ -309,7 +354,7 @@ def CodeWritingTool(cols: List[str], query: str, df: pd.DataFrame, conversation_
     return prompt
 
 
-def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] = None, memory_agent: ColumnMemoryAgent = None, retry_context: str = None):
+def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] = None, memory_agent: ColumnMemoryAgent = None, retry_context: str = None, plot_engine: str = "plotly"):
     """Selects the appropriate code generation tool and gets code from the LLM for the user's query."""
     logger.info(f"🤖 CodeGenerationAgent: Processing query: '{query}'")
     logger.info(f"📊 DataFrame info: {len(df)} rows, {len(df.columns)} columns")
@@ -361,7 +406,7 @@ def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] =
     if retry_context:
         conversation_context += f"\n\nPREVIOUS ERROR TO AVOID:\n{retry_context}\n\nPlease fix this error and generate corrected code."
     
-    prompt = PlotCodeGeneratorTool(df.columns.tolist(), query, df, conversation_context, memory_agent) if should_plot else CodeWritingTool(df.columns.tolist(), query, df, conversation_context, memory_agent)
+    prompt = PlotCodeGeneratorTool(df.columns.tolist(), query, df, conversation_context, memory_agent, plot_engine) if should_plot else CodeWritingTool(df.columns.tolist(), query, df, conversation_context, memory_agent)
 
     # Base system prompt for code generation
     base_system_prompt = """detailed thinking off. You are a senior data scientist with expertise in pandas, matplotlib, and seaborn for statistical analysis and visualization. Write clean, efficient, production-ready code. Focus on:
@@ -373,7 +418,7 @@ def CodeGenerationAgent(query: str, df: pd.DataFrame, chat_history: List[Dict] =
 5. BEST PRACTICES: Follow pandas conventions and leverage seaborn for enhanced visualizations
 6. AESTHETICS: Use seaborn's statistical plotting capabilities for professional-looking charts
 
-Output ONLY a properly-closed ```python code block. Use smart_date_parser() for date parsing. Assign final result to 'result' variable."""
+Output ONLY a properly-closed ```python code block. For date parsing use smart_date_parser(df, 'column') or pd.to_datetime(df['column'], errors='coerce'). Assign final result to 'result' variable."""
     
     # Apply system prompt if active
     system_prompt = system_prompt_agent.apply_system_prompt(base_system_prompt)

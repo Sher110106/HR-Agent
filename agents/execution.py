@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import re
+import plotly.graph_objects as go
 
 from agents.data_analysis import smart_date_parser
 
@@ -145,13 +146,17 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         
         # Import helper functions for enhanced plotting
         try:
-            from utils.plot_helpers import (
-                format_axis_labels,
-                apply_professional_styling, get_professional_colors, safe_color_access, create_category_palette, optimize_figure_size,
+            # Import from plot_migration_shims for Plotly-based functions
+            from utils.plot_migration_shims import (
                 create_clean_bar_chart, create_clean_line_chart, create_clean_scatter_plot,
-                create_clean_histogram, create_clean_box_plot, create_clean_heatmap, 
-                create_clean_pie_chart, add_value_labels, smart_categorical_plot, handle_seaborn_warnings,
-                smart_annotate_points, safe_binning
+                create_clean_histogram, create_clean_box_plot, create_clean_pie_chart, 
+                create_clean_violin_plot, apply_professional_styling, format_axis_labels,
+                get_professional_colors, safe_color_access, create_category_palette, 
+                optimize_figure_size, add_value_labels, handle_seaborn_warnings, safe_binning
+            )
+            # Import remaining functions from plot_helpers that aren't in shims
+            from utils.plot_helpers import (
+                create_clean_heatmap, smart_categorical_plot, smart_annotate_points
             )
             env["format_axis_labels"] = format_axis_labels
             env["apply_professional_styling"] = apply_professional_styling 
@@ -165,6 +170,7 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
             env["create_clean_scatter_plot"] = create_clean_scatter_plot
             env["create_clean_histogram"] = create_clean_histogram
             env["create_clean_box_plot"] = create_clean_box_plot
+            env["create_clean_violin_plot"] = create_clean_violin_plot
             env["create_clean_heatmap"] = create_clean_heatmap
             env["create_clean_pie_chart"] = create_clean_pie_chart
             env["add_value_labels"] = add_value_labels
@@ -176,6 +182,21 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         except ImportError as e:
             logger.warning(f"⚠️ Could not import plot helpers: {e}")
             logger.info("🎨 Plot environment set up with matplotlib and seaborn only")
+            
+            # Add fallback safe_binning function if import fails
+            def fallback_safe_binning(data, bins, labels=None, method='cut', **kwargs):
+                """Fallback safe_binning function if import fails."""
+                try:
+                    if method == 'cut':
+                        return pd.cut(data, bins=bins, labels=labels, **kwargs)
+                    elif method == 'qcut':
+                        return pd.qcut(data, q=bins, labels=labels, **kwargs)
+                    else:
+                        return pd.cut(data, bins=5)
+                except Exception:
+                    return pd.cut(data, bins=5)
+            
+            env["safe_binning"] = fallback_safe_binning
     
     try:
         logger.info("🚀 Executing code...")
@@ -186,10 +207,19 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         if result is not None:
             result_type = type(result).__name__
             
+            # Check for multi-graph results first
+            from utils.plot_helpers import detect_multi_graph_result
+            is_multi_graph, figures, data_dfs = detect_multi_graph_result(result)
+            
+            if is_multi_graph:
+                logger.info(f"✅ Execution successful: Multi-graph result with {len(figures)} figures")
+                logger.info("🎯 Multi-graph format detected")
+                return result  # Return the multi-graph result as-is
+            
             # Check for new tuple format (fig, data_df)
             if isinstance(result, tuple) and len(result) == 2:
                 fig, data = result
-                if isinstance(fig, (plt.Figure, plt.Axes)) and isinstance(data, pd.DataFrame):
+                if isinstance(fig, (plt.Figure, plt.Axes, go.Figure)) and isinstance(data, pd.DataFrame):
                     logger.info(f"✅ Execution successful: Tuple with plot figure and DataFrame ({len(data)} rows, {len(data.columns)} columns)")
                     logger.info("🎯 New dual-output format detected - plot with underlying data")
                     return result  # Return the tuple as-is
@@ -201,7 +231,7 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
                 logger.info(f"✅ Execution successful: DataFrame with {len(result)} rows, {len(result.columns)} columns")
             elif isinstance(result, pd.Series):
                 logger.info(f"✅ Execution successful: Series with {len(result)} elements")
-            elif isinstance(result, (plt.Figure, plt.Axes)):
+            elif isinstance(result, (plt.Figure, plt.Axes, go.Figure)):
                 logger.info(f"✅ Execution successful: {result_type} plot object (legacy format)")
             else:
                 logger.info(f"✅ Execution successful: {result_type} = {str(result)[:100]}...")
@@ -236,5 +266,9 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
             error_msg += f"\n💡 Binning error detected. Check your pd.cut() or pd.qcut() parameters."
             error_msg += f"\n💡 For automatic binning: pd.cut(df['col'], bins=5)"
             error_msg += f"\n💡 For custom bins: ensure labels count = bins count - 1"
+        elif "No module named 'utils.safe_binning'" in str(exc):
+            error_msg += f"\n💡 Import error detected. The safe_binning function is available directly in the execution environment."
+            error_msg += f"\n💡 Use: safe_binning(data, bins, labels=None, method='cut') directly without import."
+            error_msg += f"\n💡 Example: df['bins'] = safe_binning(df['col'], bins=5)"
         
         return error_msg 

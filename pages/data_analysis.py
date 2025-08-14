@@ -5,6 +5,7 @@ import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib
+import plotly.graph_objects as go
 import chardet
 from datetime import datetime
 from typing import Dict, Any
@@ -177,6 +178,31 @@ def data_analysis_page():
     render_system_prompt_sidebar()
     
     with st.sidebar:
+        st.markdown("---")
+        
+        # Plotting Engine Selection
+        st.subheader("🎨 Plot Settings")
+        plot_engine = st.selectbox(
+            "Choose Plotting Engine:",
+            options=["Plotly (Interactive)", "Matplotlib (Static PNG)"],
+            index=0,
+            help="Plotly: Interactive plots, HTML downloads\nMatplotlib: Static plots, PNG downloads"
+        )
+        
+        # Store the selection in session state
+        if "plot_engine" not in st.session_state:
+            st.session_state.plot_engine = "plotly"
+        
+        if "Plotly" in plot_engine:
+            st.session_state.plot_engine = "plotly"
+        else:
+            st.session_state.plot_engine = "matplotlib"
+        
+        if st.session_state.plot_engine == "plotly":
+            st.success("📊 Plotly: Interactive plots, HTML downloads")
+        else:
+            st.success("📈 Matplotlib: Static plots, PNG downloads")
+        
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             # Clear all session state
@@ -397,23 +423,75 @@ def data_analysis_page():
                                     
                                     # Save plot to bytes buffer
                                     img_buffer = io.BytesIO()
-                                    fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+                                    if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                                        # Plotly figure - export as HTML (reliable)
+                                        from utils.plot_helpers import safe_plotly_to_html
+                                        html_content = safe_plotly_to_html(fig)
+                                        img_buffer.write(html_content.encode('utf-8'))
+                                    else:
+                                        # Matplotlib figure - PNG export (reliable)
+                                        fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
                                     img_buffer.seek(0)
                                     
+                                    # Determine file format and MIME type
+                                    if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                                        file_name = f"plot_{i+1}.html"
+                                        mime_type = "text/html"
+                                        label = "📄 Download Plot (HTML)"
+                                    else:
+                                        file_name = f"plot_{i+1}.png"
+                                        mime_type = "image/png"
+                                        label = "🖼️ Download Plot (PNG)"
+                                    
                                     st.download_button(
-                                        label="🖼️ Download Plot",
+                                        label=label,
                                         data=img_buffer.getvalue(),
-                                        file_name=f"plot_{i+1}.png",
-                                        mime="image/png",
+                                        file_name=file_name,
+                                        mime=mime_type,
                                         use_container_width=True
                                     )
                     
-                    # Display plot
+                    # Display plot(s)
                     if msg.get("plot_index") is not None:
+                        # Single plot display
                         idx = msg["plot_index"]
                         if 0 <= idx < len(st.session_state.plots):
-                            # Display plot at fixed size
-                            st.pyplot(st.session_state.plots[idx], use_container_width=False)
+                            fig = st.session_state.plots[idx]
+                            # Check if it's a Plotly figure or matplotlib
+                            if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                                # Plotly figure - clean for safe Streamlit display with proper theming
+                                from utils.plot_helpers import safe_plotly_figure_for_streamlit
+                                safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
+                                st.plotly_chart(safe_fig, use_container_width=True)
+                            else:
+                                # Matplotlib figure (legacy)
+                                st.pyplot(fig, use_container_width=False)
+                    
+                    elif msg.get("plot_indices") is not None:
+                        # Multi-plot display
+                        indices = msg["plot_indices"]
+                        st.markdown(f"**📊 {len(indices)} Visualizations:**")
+                        
+                        for i, idx in enumerate(indices):
+                            if 0 <= idx < len(st.session_state.plots):
+                                fig = st.session_state.plots[idx]
+                                
+                                # Add chart number
+                                st.markdown(f"**Chart {i+1}:**")
+                                
+                                # Check if it's a Plotly figure or matplotlib
+                                if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                                    # Plotly figure - clean for safe Streamlit display with proper theming
+                                    from utils.plot_helpers import safe_plotly_figure_for_streamlit
+                                    safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
+                                    st.plotly_chart(safe_fig, use_container_width=True)
+                                else:
+                                    # Matplotlib figure (legacy)
+                                    st.pyplot(fig, use_container_width=False)
+                                
+                                # Add separator between charts
+                                if i < len(indices) - 1:
+                                    st.markdown("---")
                     
                     # Display code in a proper expander for assistant messages
                     if msg.get("code") and msg["role"] == "assistant":
@@ -440,14 +518,20 @@ def data_analysis_page():
                                 f"Modify the previous plot: {user_q}", 
                                 st.session_state.df, 
                                 st.session_state.messages,
-                                context=f"Previous plot: {target_plot['chart_type']} chart with data: {target_plot['data'].columns.tolist()}"
+                                plot_engine=st.session_state.get("plot_engine", "plotly")
                             )
                         else:
                             # Fall back to normal processing
-                            code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages)
+                            code, should_plot_flag, code_thinking = CodeGenerationAgent(
+                                user_q, st.session_state.df, st.session_state.messages,
+                                plot_engine=st.session_state.get("plot_engine", "plotly")
+                            )
                     else:
                         # Normal processing
-                        code, should_plot_flag, code_thinking = CodeGenerationAgent(user_q, st.session_state.df, st.session_state.messages)
+                        code, should_plot_flag, code_thinking = CodeGenerationAgent(
+                            user_q, st.session_state.df, st.session_state.messages,
+                            plot_engine=st.session_state.get("plot_engine", "plotly")
+                        )
                     
                     result_obj = ExecutionAgent(code, st.session_state.df, should_plot_flag)
                     
@@ -460,7 +544,8 @@ def data_analysis_page():
                         try:
                             code_retry, should_plot_flag_retry, _ = CodeGenerationAgent(
                                 user_q, st.session_state.df, st.session_state.messages, 
-                                retry_context=error_context
+                                retry_context=error_context,
+                                plot_engine=st.session_state.get("plot_engine", "plotly")
                             )
                             result_obj_retry = ExecutionAgent(code_retry, st.session_state.df, should_plot_flag_retry)
                             
@@ -482,9 +567,11 @@ def data_analysis_page():
                     processing_time = (end_time - start_time).total_seconds()
                     logger.info(f"⏱️ Total processing time: {processing_time:.2f} seconds")
 
-                # Build assistant response - handle dual output format
-                is_dual_output = isinstance(result_obj, tuple) and len(result_obj) == 2 and isinstance(result_obj[0], (plt.Figure, plt.Axes)) and isinstance(result_obj[1], pd.DataFrame)
-                is_plot = isinstance(result_obj, (plt.Figure, plt.Axes))
+                # Build assistant response - handle multi-graph and dual output format
+                from utils.plot_helpers import detect_multi_graph_result
+                is_multi_graph, figures, data_dfs = detect_multi_graph_result(result_obj)
+                is_dual_output = isinstance(result_obj, tuple) and len(result_obj) == 2 and isinstance(result_obj[0], (plt.Figure, plt.Axes, go.Figure)) and isinstance(result_obj[1], pd.DataFrame)
+                is_plot = isinstance(result_obj, (plt.Figure, plt.Axes, go.Figure))
                 plot_idx = None
                 data_idx = None
                 
@@ -508,7 +595,24 @@ def data_analysis_page():
                     
                     # Detect chart type from the plot
                     chart_type = 'bar'  # Default, could be enhanced with better detection
-                    if hasattr(fig, 'axes') and fig.axes:
+                    if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                        # Plotly figure - detect type from first trace
+                        if fig.data and len(fig.data) > 0:
+                            trace_type = fig.data[0].type
+                            if trace_type == 'histogram':
+                                chart_type = 'histogram'
+                            elif trace_type == 'box':
+                                chart_type = 'box'
+                            elif trace_type == 'violin':
+                                chart_type = 'violin'
+                            elif trace_type == 'scatter':
+                                chart_type = 'scatter'
+                            elif trace_type == 'bar':
+                                chart_type = 'bar'
+                            else:
+                                chart_type = trace_type
+                    elif hasattr(fig, 'axes') and fig.axes:
+                        # Matplotlib figure - original detection logic
                         ax = fig.axes[0]
                         if len(ax.get_children()) > 0:
                             # Simple chart type detection
@@ -531,6 +635,37 @@ def data_analysis_page():
                     
                     header = "Here is your enhanced visualization with underlying data:"
                     logger.info(f"📊 Enhanced plot added: plot at index {plot_idx}, data at index {data_idx}, memory at {memory_idx} ({len(data_df)} rows)")
+                    
+                elif is_multi_graph:
+                    # Handle multi-graph format
+                    plot_indices = []
+                    data_indices = []
+                    
+                    for i, fig in enumerate(figures):
+                        # Store plot in session state
+                        st.session_state.plots.append(fig)
+                        plot_idx = len(st.session_state.plots) - 1
+                        plot_indices.append(plot_idx)
+                        
+                        # Store data if available
+                        data_df = data_dfs[i] if data_dfs and i < len(data_dfs) else st.session_state.df
+                        if "plot_data" not in st.session_state:
+                            st.session_state.plot_data = []
+                        st.session_state.plot_data.append(data_df)
+                        data_idx = len(st.session_state.plot_data) - 1
+                        data_indices.append(data_idx)
+                        
+                        # Add to plot memory
+                        memory_idx = st.session_state.plot_memory.add_plot(
+                            fig=fig,
+                            data_df=data_df,
+                            context=user_q,
+                            chart_type='multi_graph',
+                            styling={'theme': 'professional', 'insights': False}
+                        )
+                    
+                    header = f"Here are your {len(figures)} visualizations:"
+                    logger.info(f"📊 Multi-graph added: {len(figures)} plots at indices {plot_indices}, data at indices {data_indices}")
                     
                 elif is_plot:
                     # Handle legacy single plot format
@@ -574,13 +709,21 @@ def data_analysis_page():
                 # Combine thinking and explanation
                 assistant_msg = f"{thinking_html}{explanation_html}"
 
-                st.session_state.messages.append({
+                # Store message with appropriate plot indices
+                message_data = {
                     "role": "assistant",
                     "content": assistant_msg,
-                    "plot_index": plot_idx,
-                    "data_index": data_idx,  # Store data index for dual-output
                     "code": code  # Store code separately
-                })
+                }
+                
+                if is_multi_graph:
+                    message_data["plot_indices"] = plot_indices
+                    message_data["data_indices"] = data_indices
+                else:
+                    message_data["plot_index"] = plot_idx
+                    message_data["data_index"] = data_idx
+                
+                st.session_state.messages.append(message_data)
                 
                 logger.info("✅ Response added to chat history, rerunning app")
                 st.rerun() 

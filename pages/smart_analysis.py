@@ -106,7 +106,7 @@ def analyze_with_pandasai(df, question):
                 modified_question = question
                 if retry_count > 0:
                     if is_plot_query(question):
-                        modified_question = f"{question} Please ensure you return exactly one plot with the correct format: result = {{'type': 'plot', 'value': 'path/to/plot.png'}}"
+                        modified_question = f"{question} Please ensure you return plots with the correct format. You can return multiple plots if needed."
                     else:
                         modified_question = f"{question} Please provide a clear analysis with the correct output format."
                 
@@ -375,7 +375,7 @@ def analyze_with_pandasai(df, question):
 ❌ **PandasAI Output Error**
 
 The analysis failed because PandasAI tried to return an invalid output type. This usually happens when:
-- Multiple plots are generated but not properly formatted
+- Multiple plots are generated but not properly formatted (this is now supported)
 - The response format doesn't match PandasAI's expected output types
 
 **Valid PandasAI output types:**
@@ -391,7 +391,6 @@ The analysis failed because PandasAI tried to return an invalid output type. Thi
 
 **Try:**
 - Rephrasing your question to be more specific
-- Asking for a single plot instead of multiple plots
 - Using simpler visualization requests
 - Using the correct output type: `{{"type": "plot", "value": "path.png"}}`
 """
@@ -443,7 +442,7 @@ result = {{"type": "number", "value": 42}}
 
 **Try:**
 - Rephrasing your question
-- Asking for simpler visualizations
+- Using simpler visualizations
 - Using more specific data analysis questions
 - Ensuring the code returns the correct format
 """
@@ -485,7 +484,6 @@ result = {{"type": "plot", "value": "path/to/plot.png"}}
 
 **Try:**
 - Rephrasing your question to be more specific
-- Asking for a single plot instead of multiple plots
 - Using simpler visualization requests
 - The system will automatically retry with the correct format
 """
@@ -836,14 +834,31 @@ def render_chat_interface():
                                 
                                 # Save plot to bytes buffer
                                 img_buffer = io.BytesIO()
-                                fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+                                if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                                    # Plotly figure - export as HTML (reliable)
+                                    from utils.plot_helpers import safe_plotly_to_html
+                                    html_content = safe_plotly_to_html(fig)
+                                    img_buffer.write(html_content.encode('utf-8'))
+                                else:
+                                    # Matplotlib figure - PNG export (reliable)
+                                    fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
                                 img_buffer.seek(0)
                                 
+                                # Determine file format and MIME type
+                                if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                                    file_name = f"smart_analysis_plot_{i+1}.html"
+                                    mime_type = "text/html"
+                                    label = "📄 Download Plot (HTML)"
+                                else:
+                                    file_name = f"smart_analysis_plot_{i+1}.png"
+                                    mime_type = "image/png"
+                                    label = "🖼️ Download Plot (PNG)"
+                                
                                 st.download_button(
-                                    label="🖼️ Download Plot",
+                                    label=label,
                                     data=img_buffer.getvalue(),
-                                    file_name=f"smart_analysis_plot_{i+1}.png",
-                                    mime="image/png",
+                                    file_name=file_name,
+                                    mime=mime_type,
                                     use_container_width=True
                                 )
                 
@@ -851,8 +866,43 @@ def render_chat_interface():
                 if msg.get("plot_index") is not None:
                     idx = msg["plot_index"]
                     if 0 <= idx < len(st.session_state.plots):
-                        # Display plot at fixed size
-                        st.pyplot(st.session_state.plots[idx], use_container_width=False)
+                        fig = st.session_state.plots[idx]
+                        # Check if it's a Plotly figure or matplotlib
+                        if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                            # Plotly figure - clean for safe Streamlit display with proper theming
+                            from utils.plot_helpers import safe_plotly_figure_for_streamlit
+                            safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
+                            st.plotly_chart(safe_fig, use_container_width=True)
+                        else:
+                            # Matplotlib figure (legacy)
+                            st.pyplot(fig, use_container_width=False)
+                    
+                    # Display multiple plots
+                    elif msg.get("plot_indices") is not None:
+                        # Multi-plot display
+                        indices = msg["plot_indices"]
+                        st.markdown(f"**📊 {len(indices)} Visualizations:**")
+                        
+                        for i, idx in enumerate(indices):
+                            if 0 <= idx < len(st.session_state.plots):
+                                fig = st.session_state.plots[idx]
+                                
+                                # Add chart number
+                                st.markdown(f"**Chart {i+1}:**")
+                                
+                                # Check if it's a Plotly figure or matplotlib
+                                if hasattr(fig, 'data') and hasattr(fig, 'layout'):
+                                    # Plotly figure - clean for safe Streamlit display with proper theming
+                                    from utils.plot_helpers import safe_plotly_figure_for_streamlit
+                                    safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
+                                    st.plotly_chart(safe_fig, use_container_width=True)
+                                else:
+                                    # Matplotlib figure (legacy)
+                                    st.pyplot(fig, use_container_width=False)
+                                
+                                # Add separator between charts
+                                if i < len(indices) - 1:
+                                    st.markdown("---")
                 
                 # Display code in a proper expander for assistant messages
                 if msg.get("code") and msg["role"] == "assistant":

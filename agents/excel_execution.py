@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.graph_objects as go
 
 from agents.excel_agents import SheetPlan, ColumnIndexerAgent
 from agents.data_analysis import smart_date_parser
@@ -57,13 +58,17 @@ class ExcelExecutionAgent:
         
         # Import helper functions for enhanced plotting
         try:
-            from utils.plot_helpers import (
-                format_axis_labels,
-                apply_professional_styling, get_professional_colors, safe_color_access, create_category_palette, optimize_figure_size,
+            # Import from plot_migration_shims for Plotly-based functions
+            from utils.plot_migration_shims import (
                 create_clean_bar_chart, create_clean_line_chart, create_clean_scatter_plot,
-                create_clean_histogram, create_clean_box_plot, create_clean_heatmap, 
-                create_clean_pie_chart, add_value_labels, smart_categorical_plot, handle_seaborn_warnings,
-                smart_annotate_points
+                create_clean_histogram, create_clean_box_plot, create_clean_pie_chart, 
+                create_clean_violin_plot, apply_professional_styling, format_axis_labels,
+                get_professional_colors, safe_color_access, create_category_palette, 
+                optimize_figure_size, add_value_labels, handle_seaborn_warnings, safe_binning
+            )
+            # Import remaining functions from plot_helpers that aren't in shims
+            from utils.plot_helpers import (
+                create_clean_heatmap, smart_categorical_plot, smart_annotate_points
             )
             env["format_axis_labels"] = format_axis_labels
             env["apply_professional_styling"] = apply_professional_styling 
@@ -71,11 +76,13 @@ class ExcelExecutionAgent:
             env["safe_color_access"] = safe_color_access
             env["create_category_palette"] = create_category_palette
             env["optimize_figure_size"] = optimize_figure_size
+            env["safe_binning"] = safe_binning
             env["create_clean_bar_chart"] = create_clean_bar_chart
             env["create_clean_line_chart"] = create_clean_line_chart
             env["create_clean_scatter_plot"] = create_clean_scatter_plot
             env["create_clean_histogram"] = create_clean_histogram
             env["create_clean_box_plot"] = create_clean_box_plot
+            env["create_clean_violin_plot"] = create_clean_violin_plot
             env["create_clean_heatmap"] = create_clean_heatmap
             env["create_clean_pie_chart"] = create_clean_pie_chart
             env["add_value_labels"] = add_value_labels
@@ -144,7 +151,7 @@ class ExcelExecutionAgent:
                 # Check for new tuple format (fig, data_df) or (fig, dict_of_dataframes)
                 if isinstance(result, tuple) and len(result) == 2:
                     fig, data = result
-                    if isinstance(fig, (plt.Figure, plt.Axes)):
+                    if isinstance(fig, (plt.Figure, plt.Axes, go.Figure)):
                         if isinstance(data, pd.DataFrame):
                             logger.info(f"✅ Execution successful: Tuple with plot figure and DataFrame ({len(data)} rows, {len(data.columns)} columns)")
                             logger.info("🎯 New dual-output format detected - plot with underlying data")
@@ -171,7 +178,7 @@ class ExcelExecutionAgent:
                     logger.info(f"✅ Execution successful: DataFrame with {len(result)} rows, {len(result.columns)} columns")
                 elif isinstance(result, pd.Series):
                     logger.info(f"✅ Execution successful: Series with {len(result)} elements")
-                elif isinstance(result, (plt.Figure, plt.Axes)):
+                elif isinstance(result, (plt.Figure, plt.Axes, go.Figure)):
                     logger.info(f"✅ Execution successful: {result_type} plot object (legacy format)")
                 elif isinstance(result, (int, float, str, bool)) and result == 0:
                     # Handle case where result is 0 (likely an error in code generation)

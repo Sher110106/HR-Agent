@@ -10,7 +10,7 @@ import logging
 from unittest.mock import patch, MagicMock
 
 # Import modules under test
-from utils.health_monitor import HealthMonitor, start_health_monitoring, stop_health_monitoring
+# Health monitoring removed
 from utils.navigation import get_navigation_registry, PageConfig, register_page
 from utils.logging_config import setup_logging, get_logger
 from utils.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig
@@ -21,58 +21,22 @@ class TestHealthMonitoringIntegration(unittest.TestCase):
     
     def setUp(self):
         """Set up test environment."""
-        # Stop any existing monitoring
-        stop_health_monitoring()
-        time.sleep(0.1)  # Allow time for thread cleanup
+        # Health monitoring removed
+        pass
     
     def tearDown(self):
         """Clean up after tests."""
-        stop_health_monitoring()
-        time.sleep(0.1)  # Allow time for thread cleanup
+        # Health monitoring removed
+        pass
     
     def test_single_monitoring_thread(self):
-        """Test that only one monitoring thread is created."""
-        # Get initial thread count
-        initial_thread_count = threading.active_count()
-        
-        # Start monitoring multiple times
-        start_health_monitoring()
-        start_health_monitoring()
-        start_health_monitoring()
-        
-        # Allow time for threads to start
-        time.sleep(0.2)
-        
-        # Should only have one additional thread
-        final_thread_count = threading.active_count()
-        self.assertEqual(final_thread_count, initial_thread_count + 1)
-        
-        # Stop monitoring
-        stop_health_monitoring()
-        time.sleep(0.2)
-        
-        # Thread count should return to initial
-        cleanup_thread_count = threading.active_count()
-        self.assertEqual(cleanup_thread_count, initial_thread_count)
+        """Health monitoring removed - test skipped."""
+        self.skipTest("Health monitoring system has been removed")
     
     def test_health_monitoring_lifecycle(self):
-        """Test complete health monitoring lifecycle."""
-        monitor = HealthMonitor(check_interval=1)
-        
-        # Initially not monitoring
-        self.assertFalse(monitor._monitoring_active)
-        
-        # Start monitoring
-        monitor.start_monitoring()
-        self.assertTrue(monitor._monitoring_active)
-        self.assertIsNotNone(monitor._monitor_thread)
-        
-        # Allow some checks to run
-        time.sleep(0.5)
-        
-        # Stop monitoring
-        monitor.stop_monitoring()
-        self.assertFalse(monitor._monitoring_active)
+        """Health monitoring removed - test skipped."""
+        self.skipTest("Health monitoring system has been removed")
+
 
 
 class TestNavigationRegistryIntegration(unittest.TestCase):
@@ -224,15 +188,14 @@ class TestApplicationStartup(unittest.TestCase):
         # Import and setup the application
         from streamlit_app import main
         
-        # Mock health monitoring to avoid actual thread creation
-        with patch('utils.health_monitor.start_health_monitoring') as mock_health:
-            # Should execute without errors
-            try:
-                # This would normally be called by Streamlit, but we can't run it
-                # in tests without a full Streamlit environment
-                pass
-            except Exception as e:
-                self.fail(f"Application startup failed: {e}")
+        # Health monitoring removed - no longer needed
+        # Should execute without errors
+        try:
+            # This would normally be called by Streamlit, but we can't run it
+            # in tests without a full Streamlit environment
+            pass
+        except Exception as e:
+            self.fail(f"Application startup failed: {e}")
 
 
 if __name__ == "__main__":

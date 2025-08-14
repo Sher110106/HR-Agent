@@ -26,8 +26,83 @@ def ReasoningCurator(query: str, result: Any) -> str:
     """
     logger.info(f"🎯 ReasoningCurator: Crafting prompt for query: '{query}'")
     
-    # Determine result type and create appropriate context
-    if isinstance(result, str) and result.startswith("Error executing code"):
+    # Import multi-graph detection
+    from utils.plot_helpers import detect_multi_graph_result
+    
+    # Check if this is a multi-graph result first
+    is_multi_graph, figures, data_dfs = detect_multi_graph_result(result)
+    
+    if is_multi_graph:
+        result_type = "multi-graph visualization"
+        result_context = f"""This is a multi-graph result containing {len(figures)} visualizations.
+
+MULTI-GRAPH ANALYSIS:
+You have access to {len(figures)} different charts/plots that were created to answer the user's query.
+
+UNDERLYING DATA FOR EACH CHART:"""
+        
+        # Add data for each figure
+        for i, fig in enumerate(figures):
+            data_df = data_dfs[i] if data_dfs and i < len(data_dfs) else None
+            
+            if data_df is not None and hasattr(data_df, 'to_string'):
+                result_context += f"""
+
+CHART {i+1} DATA:
+{data_df.to_string(max_rows=15, max_cols=8)}"""
+            else:
+                # Extract data from Plotly figure if available
+                extracted_data = []
+                if hasattr(fig, 'data') and fig.data:
+                    for j, trace in enumerate(fig.data):
+                        trace_data = {}
+                        if hasattr(trace, 'x') and trace.x is not None:
+                            trace_data['x'] = list(trace.x)
+                        if hasattr(trace, 'y') and trace.y is not None:
+                            trace_data['y'] = list(trace.y)
+                        if hasattr(trace, 'name') and trace.name:
+                            trace_data['name'] = trace.name
+                        if hasattr(trace, 'type'):
+                            trace_data['type'] = trace.type
+                        
+                        if trace_data:
+                            extracted_data.append(trace_data)
+                
+                if extracted_data:
+                    result_context += f"""
+
+CHART {i+1} EXTRACTED DATA:
+Chart Type: {extracted_data[0].get('type', 'unknown')}
+Data Points: {len(extracted_data[0].get('x', []))} values"""
+                    
+                    # Add sample data values
+                    for j, trace_data in enumerate(extracted_data):
+                        if 'x' in trace_data and 'y' in trace_data:
+                            result_context += f"""
+Trace {j+1} ({trace_data.get('type', 'unknown')}):
+X values: {trace_data['x'][:5]}...
+Y values: {trace_data['y'][:5]}..."""
+                        elif 'x' in trace_data:
+                            result_context += f"""
+Trace {j+1} ({trace_data.get('type', 'unknown')}):
+Values: {trace_data['x'][:5]}..."""
+                else:
+                    result_context += f"""
+
+CHART {i+1}: No specific data available, but you can analyze the visual patterns."""
+        
+        result_context += f"""
+
+ANALYSIS REQUIREMENTS:
+- Analyze each chart individually and explain what it shows
+- Identify relationships between the different charts
+- Provide insights based on the combined multi-graph analysis
+- Reference specific data values from each chart's underlying data
+- Explain how the multiple visualizations work together to answer the user's query"""
+        
+        logger.info(f"🎯 Multi-graph result detected: {len(figures)} figures with data")
+    
+    elif isinstance(result, str) and result.startswith("Error executing code"):
         result_type = "execution error"
         result_context = f"The code execution failed with the following error:\n{result}"
         logger.info("🎯 Error result detected")
@@ -192,7 +267,15 @@ When analyzing tuple results (fig, data_df), you have access to both the visual 
 3. Explain both the visual patterns AND the numerical findings
 4. Compare the visual impression with the actual data values
 
-For example: "The bar chart shows Product A leading in sales, and the underlying data confirms this with Product A generating $125,000 compared to Product B's $89,000 and Product C's $67,000."
+# SPECIAL INSTRUCTIONS FOR MULTI-GRAPH RESULTS:
+When analyzing multi-graph results, you have access to multiple visualizations and their underlying data. Your analysis should:
+1. Analyze each chart individually with specific data values
+2. Identify relationships between the different charts
+3. Reference actual numbers from each chart's data
+4. Explain how the multiple visualizations work together
+5. Provide insights based on the combined analysis
+
+For example: "The bar chart shows Product A leading in sales ($125,000), the scatter plot reveals a strong correlation between age and salary, and the histogram shows the age distribution with most employees between 25-35 years old."
 
 -- Include specific recommendations based on the actual data found
 

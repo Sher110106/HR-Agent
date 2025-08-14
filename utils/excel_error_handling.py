@@ -248,10 +248,16 @@ class ExcelErrorHandler:
             error_type = error.error_type.value
             error_counts[error_type] = error_counts.get(error_type, 0) + 1
         
+        # Aggregate by severity as well
+        severity_counts = {}
+        for error in self.error_history:
+            severity_counts[error.severity] = severity_counts.get(error.severity, 0) + 1
+
         return {
             "total_errors": len(self.error_history),
             "error_counts": error_counts,
-            "recovery_attempts": self.recovery_attempts
+            "by_severity": severity_counts,
+            "recovery_attempts": self.recovery_attempts,
         }
 
 

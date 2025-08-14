@@ -2132,3 +2132,1093 @@ def create_clean_gantt_chart(
     # Apply styling
     create_gradient_background(ax)
     optimize_figure_size(ax)
+
+def clean_plotly_figure_for_serialization(fig):
+    """
+    Clean Plotly figure data to ensure JSON serialization compatibility.
+    Converts pandas Interval objects and other non-serializable types to strings.
+    
+    Args:
+        fig: Plotly figure object
+        
+    Returns:
+        Plotly figure object with cleaned data
+    """
+    import plotly.graph_objects as go
+    import pandas as pd
+    import numpy as np
+    
+    if not hasattr(fig, 'data') or not hasattr(fig, 'layout'):
+        return fig
+    
+    # Create a copy of the figure to avoid modifying the original
+    cleaned_fig = go.Figure(fig)
+    
+    # Clean each trace in the figure
+    for trace in cleaned_fig.data:
+        # Convert pandas Interval objects to strings in x and y data
+        if hasattr(trace, 'x') and trace.x is not None:
+            if isinstance(trace.x, pd.Series):
+                trace.x = trace.x.astype(str)
+            elif isinstance(trace.x, (list, np.ndarray)):
+                trace.x = [str(x) if hasattr(x, 'left') and hasattr(x, 'right') else x for x in trace.x]
+        
+        if hasattr(trace, 'y') and trace.y is not None:
+            if isinstance(trace.y, pd.Series):
+                trace.y = trace.y.astype(str)
+            elif isinstance(trace.y, (list, np.ndarray)):
+                trace.y = [str(y) if hasattr(y, 'left') and hasattr(y, 'right') else y for y in trace.y]
+        
+        # Clean customdata if it exists
+        if hasattr(trace, 'customdata') and trace.customdata is not None:
+            if isinstance(trace.customdata, (list, np.ndarray)):
+                trace.customdata = [
+                    [str(item) if hasattr(item, 'left') and hasattr(item, 'right') else item 
+                     for item in row] if isinstance(row, (list, np.ndarray)) else row
+                    for row in trace.customdata
+                ]
+        
+        # Clean text data if it exists
+        if hasattr(trace, 'text') and trace.text is not None:
+            if isinstance(trace.text, pd.Series):
+                trace.text = trace.text.astype(str)
+            elif isinstance(trace.text, (list, np.ndarray)):
+                trace.text = [str(t) if hasattr(t, 'left') and hasattr(t, 'right') else t for t in trace.text]
+    
+    return cleaned_fig
+
+
+def safe_plotly_to_html(fig, **kwargs):
+    """
+    Safely convert Plotly figure to HTML, handling non-serializable objects.
+    
+    Args:
+        fig: Plotly figure object
+        **kwargs: Additional arguments for plotly.offline.plot
+        
+    Returns:
+        str: HTML content
+    """
+    import plotly.offline as pyo
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    # Clean the figure before serialization
+    cleaned_fig = clean_plotly_figure_for_serialization(fig)
+    
+    try:
+        # Try to convert to HTML
+        html_content = pyo.plot(cleaned_fig, output_type='div', include_plotlyjs=True, **kwargs)
+        return html_content
+    except TypeError as e:
+        # If still fails, try with a more aggressive cleaning
+        if "not JSON serializable" in str(e):
+            logger.warning(f"🔧 JSON serialization failed, attempting minimal figure creation: {e}")
+            
+            # Create a minimal figure with just the essential data
+            import plotly.graph_objects as go
+            
+            minimal_fig = go.Figure()
+            for trace in cleaned_fig.data:
+                try:
+                    # Create a new trace with only basic data
+                    new_trace = go.Scatter(
+                        x=trace.x if hasattr(trace, 'x') else None,
+                        y=trace.y if hasattr(trace, 'y') else None,
+                        mode=trace.mode if hasattr(trace, 'mode') else 'lines+markers',
+                        name=trace.name if hasattr(trace, 'name') else None,
+                        type=trace.type if hasattr(trace, 'type') else 'scatter'
+                    )
+                    minimal_fig.add_trace(new_trace)
+                except Exception as trace_error:
+                    logger.warning(f"🔧 Failed to add trace to minimal figure: {trace_error}")
+                    continue
+            
+            # Copy layout
+            if hasattr(cleaned_fig, 'layout'):
+                minimal_fig.layout = cleaned_fig.layout
+            
+            try:
+                return pyo.plot(minimal_fig, output_type='div', include_plotlyjs=True, **kwargs)
+            except Exception as minimal_error:
+                logger.error(f"❌ Even minimal figure creation failed: {minimal_error}")
+                # Last resort: return a simple error message as HTML
+                return f"""
+                <div style="padding: 20px; border: 1px solid #ccc; background: #f9f9f9;">
+                    <h3>⚠️ Plot Display Error</h3>
+                    <p>The plot could not be displayed due to data serialization issues.</p>
+                    <p><strong>Error:</strong> {str(e)}</p>
+                    <p>This typically happens when the plot contains complex data types that cannot be serialized to JSON.</p>
+                </div>
+                """
+        else:
+            raise e
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in safe_plotly_to_html: {e}")
+        # Return a simple error message as HTML
+        return f"""
+        <div style="padding: 20px; border: 1px solid #ccc; background: #f9f9f9;">
+            <h3>⚠️ Plot Display Error</h3>
+            <p>The plot could not be displayed due to an unexpected error.</p>
+            <p><strong>Error:</strong> {str(e)}</p>
+        </div>
+        """
+
+
+def safe_plotly_figure_for_streamlit(fig, theme: str = 'auto', variant: str = 'professional'):
+    """
+    Clean Plotly figure for safe display in Streamlit with proper theming.
+    This function ensures the figure can be safely passed to st.plotly_chart().
+    
+    Args:
+        fig: Plotly figure object
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        
+    Returns:
+        Plotly figure object safe for Streamlit display with proper theming
+    """
+    import plotly.graph_objects as go
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    if not hasattr(fig, 'data') or not hasattr(fig, 'layout'):
+        return fig
+    
+    try:
+        # Clean the figure using the existing function
+        cleaned_fig = clean_plotly_figure_for_serialization(fig)
+        
+        # Apply proper theming to the cleaned figure
+        apply_plotly_theme(cleaned_fig, theme, variant)
+        apply_plotly_trace_colors(cleaned_fig, theme=theme, variant=variant)
+        enhance_plotly_accessibility(cleaned_fig, theme)
+        
+        return cleaned_fig
+    except Exception as e:
+        logger.warning(f"🔧 Failed to clean figure for Streamlit: {e}")
+        
+        # Create a minimal safe figure as fallback with proper theming
+        try:
+            minimal_fig = go.Figure()
+            for trace in fig.data:
+                try:
+                    # Create a new trace with only basic data
+                    new_trace = go.Scatter(
+                        x=trace.x if hasattr(trace, 'x') else None,
+                        y=trace.y if hasattr(trace, 'y') else None,
+                        mode=trace.mode if hasattr(trace, 'mode') else 'lines+markers',
+                        name=trace.name if hasattr(trace, 'name') else None,
+                        type=trace.type if hasattr(trace, 'type') else 'scatter'
+                    )
+                    minimal_fig.add_trace(new_trace)
+                except Exception as trace_error:
+                    logger.warning(f"🔧 Failed to add trace to minimal Streamlit figure: {trace_error}")
+                    continue
+            
+            # Apply proper theming to the minimal figure
+            apply_plotly_theme(minimal_fig, theme, variant)
+            apply_plotly_trace_colors(minimal_fig, theme=theme, variant=variant)
+            enhance_plotly_accessibility(minimal_fig, theme)
+            
+            return minimal_fig
+        except Exception as fallback_error:
+            logger.error(f"❌ Failed to create minimal figure for Streamlit: {fallback_error}")
+            # Return a simple empty figure with proper theming as last resort
+            empty_fig = go.Figure()
+            apply_plotly_theme(empty_fig, theme, variant)
+            return empty_fig
+
+def get_plotly_theme_colors(theme: str = 'light', variant: str = 'professional') -> dict:
+    """
+    Get comprehensive Plotly theme colors for different backgrounds and themes.
+    
+    Args:
+        theme: 'light', 'dark', 'auto' (detects system preference)
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        
+    Returns:
+        dict: Complete color scheme for Plotly charts
+    """
+    import plotly.graph_objects as go
+    
+    # Base themes
+    themes = {
+        'light': {
+            'background': '#ffffff',
+            'paper': '#ffffff',
+            'text': '#2c3e50',
+            'grid': '#ecf0f1',
+            'axis': '#bdc3c7',
+            'title': '#2c3e50',
+            'subtitle': '#7f8c8d'
+        },
+        'dark': {
+            'background': '#1a1a1a',
+            'paper': '#2d2d2d',
+            'text': '#ffffff',
+            'grid': '#404040',
+            'axis': '#666666',
+            'title': '#ffffff',
+            'subtitle': '#cccccc'
+        },
+        'auto': {
+            'background': '#ffffff',  # Will be overridden by system detection
+            'paper': '#ffffff',
+            'text': '#2c3e50',
+            'grid': '#ecf0f1',
+            'axis': '#bdc3c7',
+            'title': '#2c3e50',
+            'subtitle': '#7f8c8d'
+        }
+    }
+    
+    # Color palettes for different variants
+    palettes = {
+        'professional': {
+            'primary': ['#3498db', '#2980b9', '#1f618d', '#154360'],
+            'secondary': ['#e74c3c', '#c0392b', '#a93226', '#922b21'],
+            'accent': ['#f39c12', '#e67e22', '#d35400', '#ba4a00'],
+            'success': ['#27ae60', '#229954', '#1e8449', '#196f3d'],
+            'neutral': ['#95a5a6', '#7f8c8d', '#6c7b7d', '#5d6d7e']
+        },
+        'modern': {
+            'primary': ['#2c3e50', '#34495e', '#3498db', '#2980b9'],
+            'secondary': ['#e74c3c', '#c0392b', '#a93226', '#922b21'],
+            'accent': ['#1abc9c', '#16a085', '#138d75', '#117a65'],
+            'success': ['#27ae60', '#229954', '#1e8449', '#196f3d'],
+            'neutral': ['#95a5a6', '#7f8c8d', '#6c7b7d', '#5d6d7e']
+        },
+        'minimal': {
+            'primary': ['#2c3e50', '#34495e', '#5d6d7e', '#85929e'],
+            'secondary': ['#e74c3c', '#c0392b', '#a93226', '#922b21'],
+            'accent': ['#f39c12', '#e67e22', '#d35400', '#ba4a00'],
+            'success': ['#27ae60', '#229954', '#1e8449', '#196f3d'],
+            'neutral': ['#bdc3c7', '#aeb6bf', '#85929e', '#6c7b7d']
+        },
+        'colorful': {
+            'primary': ['#3498db', '#e74c3c', '#f39c12', '#27ae60'],
+            'secondary': ['#9b59b6', '#e67e22', '#1abc9c', '#34495e'],
+            'accent': ['#f1c40f', '#e74c3c', '#3498db', '#2ecc71'],
+            'success': ['#27ae60', '#2ecc71', '#16a085', '#138d75'],
+            'neutral': ['#95a5a6', '#7f8c8d', '#6c7b7d', '#5d6d7e']
+        }
+    }
+    
+    # Get base theme colors
+    base_colors = themes.get(theme, themes['light'])
+    palette = palettes.get(variant, palettes['professional'])
+    
+    # Auto theme detection (placeholder for future implementation)
+    if theme == 'auto':
+        # For now, default to light theme
+        # In the future, this could detect system dark mode preference
+        base_colors = themes['light']
+    
+    return {
+        'background': base_colors['background'],
+        'paper': base_colors['paper'],
+        'text': base_colors['text'],
+        'grid': base_colors['grid'],
+        'axis': base_colors['axis'],
+        'title': base_colors['title'],
+        'subtitle': base_colors['subtitle'],
+        'palette': palette
+    }
+
+
+def apply_plotly_theme(fig, theme: str = 'light', variant: str = 'professional', 
+                      title: str = "", xlabel: str = "", ylabel: str = "") -> None:
+    """
+    Apply comprehensive theme to Plotly figure with proper contrast and colors.
+    
+    Args:
+        fig: Plotly figure object
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        title: Chart title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+    """
+    import plotly.graph_objects as go
+    
+    # Get theme colors
+    colors = get_plotly_theme_colors(theme, variant)
+    
+    # Apply layout theme
+    layout_kwargs = dict(
+        # Background and paper colors
+        plot_bgcolor=colors['background'],
+        paper_bgcolor=colors['paper'],
+        
+        # Font family for all text
+        font={
+            'family': 'Arial, sans-serif',
+            'color': colors['text'],
+            'size': 12
+        },
+        
+        # Margins for better spacing
+        margin=dict(l=60, r=60, t=80, b=60),
+        
+        # Legend styling
+        legend={
+            'bgcolor': colors['paper'],
+            'bordercolor': colors['axis'],
+            'borderwidth': 1,
+            'font': {'color': colors['text']}
+        },
+        
+        # Hover template styling
+        hoverlabel={
+            'bgcolor': colors['paper'],
+            'bordercolor': colors['axis'],
+            'font': {'color': colors['text']}
+        }
+    )
+
+    # Only set title if provided (avoid overwriting existing meaningful titles)
+    if title:
+        layout_kwargs['title'] = {
+            'text': title,
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {
+                'size': 18,
+                'color': colors['title'],
+                'family': 'Arial, sans-serif'
+            }
+        }
+
+    fig.update_layout(**layout_kwargs)
+    
+    # Apply axis styling
+    xaxis_kwargs = dict(
+        tickfont={'color': colors['text'], 'size': 11},
+        gridcolor=colors['grid'],
+        zerolinecolor=colors['axis'],
+        linecolor=colors['axis'],
+        showgrid=True,
+        gridwidth=1
+    )
+    if xlabel:
+        xaxis_kwargs['title'] = {'text': xlabel, 'font': {'color': colors['text'], 'size': 14}}
+    fig.update_xaxes(**xaxis_kwargs)
+    
+    yaxis_kwargs = dict(
+        tickfont={'color': colors['text'], 'size': 11},
+        gridcolor=colors['grid'],
+        zerolinecolor=colors['axis'],
+        linecolor=colors['axis'],
+        showgrid=True,
+        gridwidth=1
+    )
+    if ylabel:
+        yaxis_kwargs['title'] = {'text': ylabel, 'font': {'color': colors['text'], 'size': 14}}
+    fig.update_yaxes(**yaxis_kwargs)
+
+
+def create_plotly_color_palette(theme: str = 'light', variant: str = 'professional', 
+                               n_colors: int = 8) -> list:
+    """
+    Create a color palette for Plotly charts with proper contrast.
+    
+    Args:
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        n_colors: Number of colors needed
+        
+    Returns:
+        list: Color palette optimized for the theme
+    """
+    colors = get_plotly_theme_colors(theme, variant)
+    palette = colors['palette']
+    
+    # Flatten the palette and cycle if needed
+    flat_palette = []
+    for category in ['primary', 'secondary', 'accent', 'success', 'neutral']:
+        flat_palette.extend(palette[category])
+    
+    # Ensure we have enough colors
+    while len(flat_palette) < n_colors:
+        flat_palette.extend(flat_palette[:n_colors - len(flat_palette)])
+    
+    return flat_palette[:n_colors]
+
+
+def apply_plotly_trace_colors(fig, colors: list = None, theme: str = 'light', 
+                             variant: str = 'professional') -> None:
+    """
+    Apply colors to Plotly figure traces with proper contrast.
+    
+    Args:
+        fig: Plotly figure object
+        colors: Optional list of colors to use
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+    """
+    if colors is None:
+        colors = create_plotly_color_palette(theme, variant, len(fig.data))
+    
+    # Apply colors to each trace
+    for i, trace in enumerate(fig.data):
+        color = colors[i % len(colors)]
+        
+        # Apply color based on trace type
+        if hasattr(trace, 'marker'):
+            trace.marker.color = color
+        if hasattr(trace, 'line'):
+            trace.line.color = color
+        if hasattr(trace, 'fillcolor'):
+            trace.fillcolor = color
+
+
+def create_plotly_figure_with_theme(chart_type: str = 'scatter', theme: str = 'light', 
+                                   variant: str = 'professional') -> object:
+    """
+    Create a Plotly figure with proper theme and styling.
+    
+    Args:
+        chart_type: Type of chart ('scatter', 'bar', 'line', etc.)
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        
+    Returns:
+        go.Figure: Pre-styled Plotly figure
+    """
+    import plotly.graph_objects as go
+    
+    fig = go.Figure()
+    
+    # Apply base theme
+    apply_plotly_theme(fig, theme, variant)
+    
+    return fig
+
+
+def enhance_plotly_accessibility(fig, theme: str = 'light') -> None:
+    """
+    Enhance Plotly figure accessibility with proper contrast and labels.
+    
+    Args:
+        fig: Plotly figure object
+        theme: 'light', 'dark', 'auto'
+    """
+    colors = get_plotly_theme_colors(theme)
+    
+    # Add better hover templates
+    for trace in fig.data:
+        if hasattr(trace, 'hovertemplate') and trace.hovertemplate is not None:
+            # Ensure hover templates have good contrast
+            trace.hovertemplate = trace.hovertemplate.replace(
+                '<b>', f'<b style="color: {colors["title"]};">'
+            )
+    
+    # Ensure all text has proper contrast
+    fig.update_layout(
+        font={'color': colors['text']},
+        title={'font': {'color': colors['title']}},
+        legend={'font': {'color': colors['text']}}
+    )
+
+
+def get_plotly_theme_for_streamlit() -> str:
+    """
+    Detect the best theme for Streamlit display.
+    
+    Returns:
+        str: Recommended theme ('light' or 'dark')
+    """
+    # For now, return 'light' as default
+    # In the future, this could detect Streamlit's theme setting
+    return 'light'
+
+
+def create_robust_plotly_chart(data_df: pd.DataFrame, x_col: str, y_col: str = None,
+                               chart_type: str = 'auto', theme: str = 'auto',
+                               variant: str = 'professional', title: str = "",
+                               xlabel: str = "", ylabel: str = "") -> object:
+    """
+    Create a robust Plotly chart with proper theming and contrast.
+    
+    Args:
+        data_df: DataFrame with data
+        x_col: X-axis column
+        y_col: Y-axis column (optional for some chart types)
+        chart_type: 'auto', 'scatter', 'bar', 'line', 'histogram', 'box'
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        title: Chart title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+        
+    Returns:
+        go.Figure: Styled Plotly figure
+    """
+    import plotly.graph_objects as go
+    import plotly.express as px
+    
+    # Auto-detect theme if needed
+    if theme == 'auto':
+        theme = get_plotly_theme_for_streamlit()
+    
+    # Clean data to handle pandas Interval objects
+    clean_df = data_df.copy()
+    for col in clean_df.columns:
+        if clean_df[col].dtype.name == 'category' and hasattr(clean_df[col].iloc[0], 'left'):
+            # Convert Interval objects to strings
+            clean_df[col] = clean_df[col].astype(str)
+    
+    # Auto-detect chart type if needed
+    if chart_type == 'auto':
+        if y_col is None:
+            chart_type = 'histogram'
+        elif clean_df[x_col].dtype == 'object' and clean_df[y_col].dtype in ['int64', 'float64']:
+            chart_type = 'bar'
+        else:
+            chart_type = 'scatter'
+    
+    # Create figure based on chart type
+    if chart_type == 'scatter':
+        fig = px.scatter(clean_df, x=x_col, y=y_col, title=title)
+    elif chart_type == 'bar':
+        fig = px.bar(clean_df, x=x_col, y=y_col, title=title)
+    elif chart_type == 'line':
+        fig = px.line(clean_df, x=x_col, y=y_col, title=title)
+    elif chart_type == 'histogram':
+        fig = px.histogram(clean_df, x=x_col, title=title)
+    elif chart_type == 'box':
+        fig = px.box(clean_df, x=x_col, y=y_col, title=title)
+    else:
+        # Default to scatter
+        fig = px.scatter(clean_df, x=x_col, y=y_col, title=title)
+    
+    # Apply comprehensive theming
+    apply_plotly_theme(fig, theme, variant, title, xlabel, ylabel)
+    apply_plotly_trace_colors(fig, theme=theme, variant=variant)
+    enhance_plotly_accessibility(fig, theme)
+    
+    # Enhance legends and labels
+    enhance_plotly_legends_and_labels(fig, data_df, x_col, y_col, chart_type, theme)
+    
+    return fig
+
+def enhance_plotly_legends_and_labels(fig, data_df: pd.DataFrame, x_col: str, y_col: str, 
+                                     chart_type: str, theme: str = 'light') -> None:
+    """
+    Enhance Plotly figure with better legends and labels.
+    
+    Args:
+        fig: Plotly figure object
+        data_df: DataFrame with data
+        x_col: X-axis column name
+        y_col: Y-axis column name
+        chart_type: Type of chart
+        theme: Theme for colors
+    """
+    colors = get_plotly_theme_colors(theme)
+    
+    # Force axis labels if missing; otherwise enhance if they're just raw column names
+    if not getattr(fig.layout.xaxis.title, 'text', None):
+        fig.update_xaxes(title_text=(x_col or 'X'))
+    # Enhance axis labels if they're generic
+    if fig.layout.xaxis.title.text == x_col:
+        # Make x-axis label more descriptive
+        x_label = x_col.replace('_', ' ').title()
+        if x_col.lower() in ['date', 'time', 'datetime']:
+            x_label = 'Date'
+        elif x_col.lower() in ['age', 'years']:
+            x_label = 'Age'
+        elif x_col.lower() in ['salary', 'income', 'pay']:
+            x_label = 'Salary'
+        elif x_col.lower() in ['department', 'dept']:
+            x_label = 'Department'
+        elif x_col.lower() in ['category', 'cat']:
+            x_label = 'Category'
+        
+        fig.update_xaxes(title_text=x_label)
+    
+    if not getattr(fig.layout.yaxis.title, 'text', None):
+        fig.update_yaxes(title_text=(y_col or 'Y'))
+    if y_col and fig.layout.yaxis.title.text == y_col:
+        # Make y-axis label more descriptive
+        y_label = y_col.replace('_', ' ').title()
+        if y_col.lower() in ['count', 'frequency']:
+            y_label = 'Count'
+        elif y_col.lower() in ['salary', 'income', 'pay']:
+            y_label = 'Salary'
+        elif y_col.lower() in ['age', 'years']:
+            y_label = 'Age'
+        elif y_col.lower() in ['value', 'amount']:
+            y_label = 'Value'
+        
+        fig.update_yaxes(title_text=y_label)
+    
+    # Enhance legends
+    if fig.data:
+        for i, trace in enumerate(fig.data):
+            # Add better trace names for legends
+            if not trace.name or trace.name == 'trace 0':
+                if chart_type == 'scatter':
+                    trace.name = f'{y_col} vs {x_col}'
+                elif chart_type == 'bar':
+                    trace.name = f'{y_col} by {x_col}'
+                elif chart_type == 'line':
+                    trace.name = f'{y_col} over {x_col}'
+                elif chart_type == 'histogram':
+                    trace.name = f'Distribution of {x_col}'
+                elif chart_type == 'box':
+                    trace.name = f'{y_col} by {x_col}'
+                else:
+                    trace.name = f'Chart {i+1}'
+            
+            # Add hover template with better formatting
+            if hasattr(trace, 'hovertemplate') and trace.hovertemplate:
+                # Enhance hover template
+                if chart_type == 'scatter':
+                    trace.hovertemplate = f'<b>{x_col.title()}</b>: %{{x}}<br>' + \
+                                        f'<b>{y_col.title()}</b>: %{{y}}<br>' + \
+                                        '<extra></extra>'
+                elif chart_type == 'bar':
+                    trace.hovertemplate = f'<b>{x_col.title()}</b>: %{{x}}<br>' + \
+                                        f'<b>{y_col.title()}</b>: %{{y}}<br>' + \
+                                        '<extra></extra>'
+                elif chart_type == 'histogram':
+                    trace.hovertemplate = f'<b>{x_col.title()}</b>: %{{x}}<br>' + \
+                                        f'<b>Count</b>: %{{y}}<br>' + \
+                                        '<extra></extra>'
+    
+    # Update legend styling
+    fig.update_layout(
+        legend=dict(
+            bgcolor=colors['paper'],
+            bordercolor=colors['axis'],
+            borderwidth=1,
+            font=dict(color=colors['text'], size=12),
+            title=dict(text='Legend', font=dict(color=colors['title'], size=14))
+        )
+    )
+
+
+def create_enhanced_multi_plotly_charts(data_df: pd.DataFrame, chart_configs: list, 
+                                       theme: str = 'auto', variant: str = 'professional') -> list:
+    """
+    Create enhanced multiple Plotly charts with better labels, legends, and titles.
+    
+    Args:
+        data_df: DataFrame with data
+        chart_configs: List of chart configurations
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        
+    Returns:
+        list: List of Plotly figures
+    """
+    import plotly.graph_objects as go
+    import plotly.express as px
+    
+    figures = []
+    
+    for i, config in enumerate(chart_configs):
+        try:
+            # Extract configuration
+            chart_type = config.get('type', 'auto')
+            x_col = config.get('x')
+            y_col = config.get('y')
+            title = config.get('title', f'Chart {i+1}')
+            xlabel = config.get('xlabel', x_col)
+            ylabel = config.get('ylabel', y_col)
+            
+            # Create enhanced robust chart
+            fig = create_robust_plotly_chart(
+                data_df, x_col, y_col,
+                chart_type=chart_type,
+                theme=theme,
+                variant=variant,
+                title=title,
+                xlabel=xlabel,
+                ylabel=ylabel
+            )
+            
+            # Additional enhancements for multi-graph
+            enhance_multi_graph_titles(fig, i+1, len(chart_configs), title)
+            
+            figures.append(fig)
+            
+        except Exception as e:
+            # Create error figure
+            error_fig = go.Figure()
+            error_fig.add_annotation(
+                text=f"Error creating chart {i+1}: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="red")
+            )
+            error_fig.update_layout(
+                title=f"Error - Chart {i+1}",
+                plot_bgcolor='white',
+                paper_bgcolor='white'
+            )
+            figures.append(error_fig)
+    
+    return figures
+
+
+def enhance_multi_graph_titles(fig, chart_number: int, total_charts: int, title: str) -> None:
+    """
+    Enhance titles for multi-graph displays.
+    
+    Args:
+        fig: Plotly figure object
+        chart_number: Current chart number (1-based)
+        total_charts: Total number of charts
+        title: Original title
+    """
+    # Add chart number to title if there are multiple charts
+    if total_charts > 1:
+        enhanced_title = f"Chart {chart_number} of {total_charts}: {title}"
+        fig.update_layout(title_text=enhanced_title)
+    
+    # Add subtitle with chart type if not present
+    if not fig.layout.title.text:
+        fig.update_layout(title_text=f"Chart {chart_number}: {title}")
+
+def create_multi_plotly_charts(data_df: pd.DataFrame, chart_configs: list, 
+                              theme: str = 'auto', variant: str = 'professional') -> list:
+    """
+    Create multiple Plotly charts based on configuration with enhanced labels and legends.
+    
+    Args:
+        data_df: DataFrame with data
+        chart_configs: List of chart configurations
+        theme: 'light', 'dark', 'auto'
+        variant: 'professional', 'modern', 'minimal', 'colorful'
+        
+    Returns:
+        list: List of Plotly figures
+    """
+    # Use the enhanced version for better labels and legends
+    return create_enhanced_multi_plotly_charts(data_df, chart_configs, theme, variant)
+
+
+def create_multi_matplotlib_charts(data_df: pd.DataFrame, chart_configs: list,
+                                 theme: str = 'professional') -> list:
+    """
+    Create multiple matplotlib charts based on configuration with enhanced labels and titles.
+    
+    Args:
+        data_df: DataFrame with data
+        chart_configs: List of chart configurations
+        theme: 'professional', 'modern', 'minimal'
+        
+    Returns:
+        list: List of matplotlib figures
+    """
+    import matplotlib.pyplot as plt
+    
+    figures = []
+    
+    for i, config in enumerate(chart_configs):
+        try:
+            # Extract configuration
+            chart_type = config.get('type', 'auto')
+            x_col = config.get('x')
+            y_col = config.get('y')
+            title = config.get('title', f'Chart {i+1}')
+            xlabel = config.get('xlabel', x_col)
+            ylabel = config.get('ylabel', y_col)
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # Create chart based on type
+            if chart_type == 'bar':
+                create_clean_bar_chart(ax, data_df, x_col, y_col, title=title, xlabel=xlabel, ylabel=ylabel, theme=theme)
+            elif chart_type == 'line':
+                create_clean_line_chart(ax, data_df, x_col, y_col, title=title, xlabel=xlabel, ylabel=ylabel, theme=theme)
+            elif chart_type == 'scatter':
+                create_clean_scatter_plot(ax, data_df, x_col, y_col, title=title, xlabel=xlabel, ylabel=ylabel, theme=theme)
+            elif chart_type == 'histogram':
+                create_clean_histogram(ax, data_df, x_col, title=title, xlabel=xlabel, ylabel=ylabel, theme=theme)
+            elif chart_type == 'box':
+                create_clean_box_plot(ax, data_df, x_col, y_col, title=title, xlabel=xlabel, ylabel=ylabel, theme=theme)
+            else:
+                # Default to bar chart
+                create_clean_bar_chart(ax, data_df, x_col, y_col, title=title, xlabel=xlabel, ylabel=ylabel, theme=theme)
+            
+            # Enhance title for multi-graph display
+            if len(chart_configs) > 1:
+                enhanced_title = f"Chart {i+1} of {len(chart_configs)}: {title}"
+                ax.set_title(enhanced_title, fontsize=14, fontweight='bold', pad=20)
+            
+            # Enhance axis labels if they're generic
+            enhance_matplotlib_labels(ax, x_col, y_col, chart_type)
+            
+            # Ensure legend is visible
+            if ax.get_legend():
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+            
+            figures.append(fig)
+            
+        except Exception as e:
+            # Create error figure
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.text(0.5, 0.5, f'Error creating chart {i+1}: {str(e)}', 
+                   ha='center', va='center', transform=ax.transAxes, 
+                   fontsize=12, color='red')
+            ax.set_title(f'Error - Chart {i+1}')
+            figures.append(fig)
+    
+    return figures
+
+
+def enhance_matplotlib_labels(ax, x_col: str, y_col: str, chart_type: str) -> None:
+    """
+    Enhance matplotlib axis labels to be more descriptive.
+    
+    Args:
+        ax: Matplotlib axes object
+        x_col: X-axis column name
+        y_col: Y-axis column name
+        chart_type: Type of chart
+    """
+    # Enhance x-axis label
+    if ax.get_xlabel() == x_col:
+        x_label = x_col.replace('_', ' ').title()
+        if x_col.lower() in ['date', 'time', 'datetime']:
+            x_label = 'Date'
+        elif x_col.lower() in ['age', 'years']:
+            x_label = 'Age'
+        elif x_col.lower() in ['salary', 'income', 'pay']:
+            x_label = 'Salary'
+        elif x_col.lower() in ['department', 'dept']:
+            x_label = 'Department'
+        elif x_col.lower() in ['category', 'cat']:
+            x_label = 'Category'
+        
+        ax.set_xlabel(x_label, fontsize=12, fontweight='bold')
+    
+    # Enhance y-axis label
+    if y_col and ax.get_ylabel() == y_col:
+        y_label = y_col.replace('_', ' ').title()
+        if y_col.lower() in ['count', 'frequency']:
+            y_label = 'Count'
+        elif y_col.lower() in ['salary', 'income', 'pay']:
+            y_label = 'Salary'
+        elif y_col.lower() in ['age', 'years']:
+            y_label = 'Age'
+        elif y_col.lower() in ['value', 'amount']:
+            y_label = 'Value'
+        
+        ax.set_ylabel(y_label, fontsize=12, fontweight='bold')
+
+
+def detect_multi_graph_result(result) -> tuple:
+    """
+    Detect if result contains multiple graphs and return appropriate format.
+    
+    Args:
+        result: Execution result from code
+        
+    Returns:
+        tuple: (is_multi_graph, figures, data_df)
+    """
+    import matplotlib.pyplot as plt
+    import plotly.graph_objects as go
+    
+    # Check if result is a list of figures
+    if isinstance(result, list):
+        # Check if all items are figures
+        if all(isinstance(item, (plt.Figure, go.Figure)) for item in result):
+            return True, result, None
+        # Check if it's a list of tuples (fig, data)
+        elif all(isinstance(item, tuple) and len(item) == 2 and 
+                isinstance(item[0], (plt.Figure, go.Figure)) and 
+                isinstance(item[1], pd.DataFrame) for item in result):
+            figures = [item[0] for item in result]
+            data_dfs = [item[1] for item in result]
+            return True, figures, data_dfs
+    
+    # Check if result is a tuple with multiple figures
+    elif isinstance(result, tuple):
+        if len(result) == 2:
+            fig, data = result
+            # Check if fig is a list of figures
+            if isinstance(fig, list) and all(isinstance(f, (plt.Figure, go.Figure)) for f in fig):
+                return True, fig, data
+            # Check if data is a list of dataframes
+            elif isinstance(data, list) and all(isinstance(d, pd.DataFrame) for d in data):
+                return True, fig, data
+    
+    return False, None, None
+
+
+def format_multi_graph_response(figures: list, data_dfs: list = None, 
+                              plot_engine: str = 'plotly') -> dict:
+    """
+    Format multiple graphs for display in the application.
+    
+    Args:
+        figures: List of figures (matplotlib or Plotly)
+        data_dfs: Optional list of DataFrames
+        plot_engine: 'plotly' or 'matplotlib'
+        
+    Returns:
+        dict: Formatted response for display
+    """
+    response = {
+        'type': 'multi_graph',
+        'plot_engine': plot_engine,
+        'count': len(figures),
+        'figures': figures,
+        'data_dfs': data_dfs or [None] * len(figures)
+    }
+    
+    # Add metadata for each figure
+    for i, fig in enumerate(figures):
+        if hasattr(fig, 'layout') and hasattr(fig, 'data'):
+            # Plotly figure
+            response[f'plotly_figure_{i}'] = fig
+        else:
+            # Matplotlib figure
+            response[f'matplotlib_figure_{i}'] = fig
+    
+    return response
+
+
+def create_multi_graph_code_template(chart_configs: list, plot_engine: str = 'plotly') -> str:
+    """
+    Generate code template for creating multiple graphs.
+    
+    Args:
+        chart_configs: List of chart configurations
+        plot_engine: 'plotly' or 'matplotlib'
+        
+    Returns:
+        str: Code template
+    """
+    if plot_engine == 'plotly':
+        code = """
+# Create multiple Plotly charts
+figures = []
+
+"""
+        for i, config in enumerate(chart_configs):
+            chart_type = config.get('type', 'auto')
+            x_col = config.get('x', 'x_column')
+            y_col = config.get('y', 'y_column')
+            title = config.get('title', f'Chart {i+1}')
+            
+            code += f"""
+# Chart {i+1}: {title}
+fig{i+1} = create_robust_plotly_chart(
+    df, '{x_col}', '{y_col}',
+    chart_type='{chart_type}',
+    theme='auto',
+    variant='professional',
+    title='{title}'
+)
+figures.append(fig{i+1})
+
+"""
+        
+        code += """
+# Return multiple figures
+result = figures
+"""
+    else:
+        code = """
+# Create multiple matplotlib charts
+figures = []
+
+"""
+        for i, config in enumerate(chart_configs):
+            chart_type = config.get('type', 'auto')
+            x_col = config.get('x', 'x_column')
+            y_col = config.get('y', 'y_column')
+            title = config.get('title', f'Chart {i+1}')
+            
+            code += f"""
+# Chart {i+1}: {title}
+fig{i+1}, ax{i+1} = plt.subplots(figsize=(10, 6))
+create_clean_{chart_type}_chart(ax{i+1}, df, '{x_col}', '{y_col}', title='{title}')
+figures.append(fig{i+1})
+
+"""
+        
+        code += """
+# Return multiple figures
+result = figures
+"""
+    
+    return code
+
+
+def validate_multi_graph_config(chart_configs: list) -> tuple:
+    """
+    Validate multi-graph configuration.
+    
+    Args:
+        chart_configs: List of chart configurations
+        
+    Returns:
+        tuple: (is_valid, error_message)
+    """
+    if not isinstance(chart_configs, list):
+        return False, "Chart configurations must be a list"
+    
+    if len(chart_configs) == 0:
+        return False, "At least one chart configuration is required"
+    
+    for i, config in enumerate(chart_configs):
+        if not isinstance(config, dict):
+            return False, f"Chart configuration {i+1} must be a dictionary"
+        
+        required_fields = ['x']
+        for field in required_fields:
+            if field not in config:
+                return False, f"Chart configuration {i+1} missing required field: {field}"
+    
+    return True, ""
+
+
+def create_multi_graph_from_dataframe(df: pd.DataFrame, columns: list = None,
+                                    chart_types: list = None, plot_engine: str = 'plotly') -> list:
+    """
+    Automatically create multiple graphs from DataFrame columns.
+    
+    Args:
+        df: DataFrame with data
+        columns: List of column names to plot (default: all numeric)
+        chart_types: List of chart types (default: auto-detect)
+        plot_engine: 'plotly' or 'matplotlib'
+        
+    Returns:
+        list: List of figures
+    """
+    if columns is None:
+        # Use all numeric columns
+        columns = df.select_dtypes(include=['number']).columns.tolist()
+    
+    if chart_types is None:
+        # Auto-detect chart types
+        chart_types = ['histogram'] * len(columns)
+    
+    # Create configurations
+    configs = []
+    for i, col in enumerate(columns):
+        chart_type = chart_types[i] if i < len(chart_types) else 'histogram'
+        configs.append({
+            'type': chart_type,
+            'x': col,
+            'title': f'Distribution of {col}'
+        })
+    
+    # Create charts
+    if plot_engine == 'plotly':
+        return create_multi_plotly_charts(df, configs)
+    else:
+        return create_multi_matplotlib_charts(df, configs)

@@ -289,6 +289,7 @@ REQUIREMENTS:
 - Use the helper functions available in the execution environment
 - Add proper titles, labels, and legends
 - Handle edge cases (empty data, missing values, etc.)
+ - AXIS LABELS ARE MANDATORY: Always set clear X and Y axis titles. If using Plotly, call fig.update_xaxes(title_text=xlabel or "X") and fig.update_yaxes(title_text=ylabel or "Y"). If using helpers, pass xlabel and ylabel explicitly.
 
 AVAILABLE HELPER FUNCTIONS:
 - apply_professional_styling(ax, title, xlabel, ylabel)

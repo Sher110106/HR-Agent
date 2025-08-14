@@ -67,14 +67,7 @@ class NavigationRegistry:
                 description="Create and manage custom AI system prompts",
                 order=4
             ),
-            "monitoring": PageConfig(
-                title="📈 Monitoring",
-                icon="📈",
-                module_path="pages.monitoring",
-                function_name="monitoring_dashboard",
-                description="Application health and performance monitoring",
-                order=5
-            )
+            
         }
         
         for page_id, config in default_pages.items():
@@ -110,13 +103,12 @@ class NavigationRegistry:
         return self.pages.get(page_id)
     
     def get_page_titles(self) -> Dict[str, str]:
-        """Get all page IDs mapped to their display titles."""
-        # Sort by order, then by title
+        """Return mapping of page_id → "<icon> <title>"."""
         sorted_pages = sorted(
             self.pages.items(),
-            key=lambda x: (x[1].order, x[1].title)
+            key=lambda x: (x[1].order, x[1].title),
         )
-        return {page_id: config.title for page_id, config in sorted_pages}
+        return {page_id: f"{config.icon} {config.title}".strip() for page_id, config in sorted_pages}
     
     def get_pages_by_category(self, category: str) -> Dict[str, PageConfig]:
         """Get all pages in a specific category (future enhancement)."""
@@ -155,6 +147,10 @@ class NavigationRegistry:
             logger.error(f"🧭 Failed to load page function for '{page_id}': {e}")
             return None
     
+    def get_page_function(self, page_id: str):
+        """Return callable for a page without executing it (used in tests)."""
+        return self._load_page_function(page_id)
+
     def render_page(self, page_id: str) -> bool:
         """Render a specific page by calling its function."""
         function = self._load_page_function(page_id)
@@ -197,15 +193,31 @@ def get_navigation_registry() -> NavigationRegistry:
     """Get the global navigation registry instance."""
     return _nav_registry
 
-def register_page(page_id: str, title: str, icon: str, module_path: str, 
-                 function_name: str, description: str = None, order: int = 0) -> bool:
-    """Convenience function to register a page."""
+def register_page(page_id: str, *args, **kwargs) -> bool:
+    """Register a page.
+
+    Supports two call styles for backward-compatibility:
+    1. ``register_page(page_id, PageConfig)`` – preferred.
+    2. ``register_page(page_id, title, icon, module_path, function_name, description=None, order=0)``
+    """
+    if len(args) == 1 and isinstance(args[0], PageConfig):
+        config: PageConfig = args[0]
+        return _nav_registry.register_page(page_id, config)
+
+    # Legacy expanded signature --------------------------------------------
+    try:
+        title, icon, module_path, function_name = args[:4]
+        description = args[4] if len(args) > 4 else kwargs.get("description")
+        order = args[5] if len(args) > 5 else kwargs.get("order", 0)
+    except ValueError:
+        raise TypeError("register_page expected PageConfig or (title, icon, module_path, function_name, ...) arguments")
+
     config = PageConfig(
         title=title,
         icon=icon,
         module_path=module_path,
         function_name=function_name,
         description=description,
-        order=order
+        order=order,
     )
     return _nav_registry.register_page(page_id, config) 
