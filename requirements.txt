@@ -12,7 +12,7 @@ openpyxl>=3.1.0
 xlrd>=2.0.0
 python-docx>=1.2.0
 squarify
-pyarrow>=14.0.1,<15.0.0
+pyarrow>=16.0.0,<17.0.0
 # PandasAI and dependencies
 pandasai>=2.2.0,<2.3.0
 litellm>=1.61.20,<2.0.0
