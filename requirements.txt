@@ -14,7 +14,7 @@ python-docx>=1.2.0
 squarify
 pyarrow>=14.0.1,<15.0.0
 # PandasAI and dependencies
-pandasai>=3.0.0b4
+pandasai>=2.3.0,<3.0.0
 pandasai-litellm>=0.0.1
 pandasai-openai>=0.1.6
 litellm>=1.61.20,<2.0.0
