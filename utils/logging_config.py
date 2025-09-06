@@ -1,12 +1,13 @@
 """
 Centralized logging configuration for the Data Analysis Agent.
-Provides consistent logging setup across all modules with environment-based configuration.
+Provides consistent logging setup across all modules with Streamlit secrets-based configuration.
 """
 
 import os
 import logging
 from logging.handlers import RotatingFileHandler
 from typing import Optional
+import streamlit as st
 
 
 def setup_logging(
@@ -26,15 +27,22 @@ def setup_logging(
         backup_count: Number of backup files to keep
         log_format: Custom log format string
     """
-    # Get configuration from environment variables with fallbacks
-    log_level = log_level or os.getenv('LOG_LEVEL', 'INFO').upper()
-    log_file = log_file or os.getenv('LOG_FILE', 'data_analysis_agent.log')
-    max_bytes = int(os.getenv('LOG_MAX_BYTES', str(max_bytes)))
-    backup_count = int(os.getenv('LOG_BACKUP_COUNT', str(backup_count)))
+    # Get configuration from Streamlit secrets with fallbacks to environment variables
+    def get_logging_config(key: str, default: str) -> str:
+        """Get logging configuration from Streamlit secrets or environment variables."""
+        try:
+            return st.secrets["logging"][key]
+        except (KeyError, AttributeError):
+            return os.getenv(f'LOG_{key}', default)
+    
+    log_level = log_level or get_logging_config('LEVEL', 'INFO').upper()
+    log_file = log_file or get_logging_config('FILE', 'data_analysis_agent.log')
+    max_bytes = int(get_logging_config('MAX_BYTES', str(max_bytes)))
+    backup_count = int(get_logging_config('BACKUP_COUNT', str(backup_count)))
     
     # Default log format
     default_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    log_format = log_format or os.getenv('LOG_FORMAT', default_format)
+    log_format = log_format or get_logging_config('FORMAT', default_format)
     
     # Prevent duplicate handlers
     if logging.root.handlers:
@@ -98,9 +106,17 @@ def configure_module_logger(module_name: str) -> logging.Logger:
     return get_logger(module_name)
 
 
-# Environment variable documentation
-ENV_VARS_DOC = """
-Environment Variables for Logging Configuration:
+# Streamlit secrets documentation
+SECRETS_DOC = """
+Streamlit Secrets for Logging Configuration:
+logging:
+  level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) [default: INFO]
+  file: Path to log file [default: data_analysis_agent.log]
+  max_bytes: Maximum log file size before rotation [default: 10485760 (10MB)]
+  backup_count: Number of backup files to keep [default: 5]
+  format: Custom log format string [default: %(asctime)s - %(name)s - %(levelname)s - %(message)s]
+
+Fallback Environment Variables (if secrets not available):
 - LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) [default: INFO]
 - LOG_FILE: Path to log file [default: data_analysis_agent.log]
 - LOG_MAX_BYTES: Maximum log file size before rotation [default: 10485760 (10MB)]
