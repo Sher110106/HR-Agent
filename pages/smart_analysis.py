@@ -13,7 +13,12 @@ import os
 
 # PandasAI imports
 import pandasai as pai
-from pandasai_openai import AzureOpenAI
+try:
+    from pandasai_openai import AzureOpenAI
+    PANDASAI_OPENAI_AVAILABLE = True
+except ImportError:
+    AzureOpenAI = None
+    PANDASAI_OPENAI_AVAILABLE = False
 
 from agents import (
     ColumnMemoryAgent, CodeGenerationAgent, ExecutionAgent, 
@@ -46,6 +51,11 @@ def get_llm_call_with_selected_model():
 def initialize_pandasai():
     """Initialize PandasAI with Azure OpenAI."""
     try:
+        # Check if pandasai_openai is available
+        if not PANDASAI_OPENAI_AVAILABLE:
+            st.warning("⚠️ PandasAI OpenAI integration not available. Smart analysis will use fallback mode.")
+            return None
+        
         # Check if Azure OpenAI is configured
         if not AZURE_API_KEY:
             st.error("❌ Azure OpenAI API key not found. Please set AZURE_API_KEY environment variable.")
@@ -88,6 +98,28 @@ def is_plot_query(question):
 
 def analyze_with_pandasai(df, question):
     """Analyze data using PandasAI with Azure OpenAI and reasoning agent, storing results in session state."""
+    # Check if pandasai_openai is available
+    if not PANDASAI_OPENAI_AVAILABLE:
+        st.warning("⚠️ PandasAI OpenAI integration not available. Using fallback analysis mode.")
+        # Use the existing agents for analysis instead
+        from agents.code_generation import CodeGenerationAgent
+        from agents.execution import ExecutionAgent
+        
+        # Generate code using the existing agent
+        code, should_plot, error = CodeGenerationAgent(question, df)
+        if error:
+            st.error(f"❌ Error generating analysis code: {error}")
+            return
+        
+        # Execute the code
+        result = ExecutionAgent(code, df)
+        if result:
+            st.success("✅ Analysis completed using fallback mode")
+            return result
+        else:
+            st.error("❌ Failed to execute analysis code")
+            return
+    
     max_retries = 3
     retry_count = 0
     
