@@ -10,7 +10,7 @@ from utils.circuit_breaker import (
 )
 from env_config import (
     AZURE_API_KEY, AZURE_ENDPOINT, AZURE_API_VERSION, AZURE_DEPLOYMENT_NAME,
-    GEMINI_API_KEY
+    GEMINI_API_KEY, _load_secrets_to_env
 )
 
 logger = logging.getLogger(__name__)
@@ -21,35 +21,58 @@ SUPPORTED_MODELS = {
     "gemini-2.5-pro": "google_genai"
 }
 
-# Initialize Azure OpenAI client
+# Global client variables
 azure_client = None
-if AZURE_API_KEY:
-    try:
-        azure_client = AzureOpenAI(
-            azure_endpoint=AZURE_ENDPOINT,
-            api_key=AZURE_API_KEY,
-            api_version=AZURE_API_VERSION
-        )
-        logger.info("✅ Azure OpenAI client initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize Azure OpenAI client: {e}")
-else:
-    logger.warning("AZURE_API_KEY environment variable not set. Azure OpenAI will not be available.")
+gemini_configured = False
 
-# Initialize Google Generative AI client
-if GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        logger.info("✅ Google Gemini client initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize Google Gemini client: {e}")
-else:
-    logger.warning("GEMINI_API_KEY environment variable not set. Gemini will not be available.")
+def initialize_clients():
+    """Initialize API clients with current configuration."""
+    global azure_client, gemini_configured
+    
+    # Load secrets into environment variables
+    _load_secrets_to_env()
+    
+    # Re-import configuration after secrets are loaded
+    from env_config import (
+        AZURE_API_KEY, AZURE_ENDPOINT, AZURE_API_VERSION, AZURE_DEPLOYMENT_NAME,
+        GEMINI_API_KEY
+    )
+    
+    # Initialize Azure OpenAI client
+    if AZURE_API_KEY:
+        try:
+            azure_client = AzureOpenAI(
+                azure_endpoint=AZURE_ENDPOINT,
+                api_key=AZURE_API_KEY,
+                api_version=AZURE_API_VERSION
+            )
+            logger.info("✅ Azure OpenAI client initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Azure OpenAI client: {e}")
+    else:
+        logger.warning("AZURE_API_KEY not available. Azure OpenAI will not be available.")
+
+    # Initialize Google Generative AI client
+    if GEMINI_API_KEY:
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            gemini_configured = True
+            logger.info("✅ Google Gemini client initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Google Gemini client: {e}")
+    else:
+        logger.warning("GEMINI_API_KEY not available. Gemini will not be available.")
+
+# Initialize clients on module load
+initialize_clients()
 
 def _make_azure_openai_call(messages: List[Dict], model: str, temperature: float, max_tokens: int, stream: bool):
     """Make Azure OpenAI API call."""
     if not azure_client:
-        raise EnvironmentError("Azure OpenAI client not initialized. Please set AZURE_API_KEY environment variable.")
+        # Try to reinitialize clients in case secrets were loaded later
+        initialize_clients()
+        if not azure_client:
+            raise EnvironmentError("Azure OpenAI client not initialized. Please configure Azure API key in Streamlit secrets.")
     
     return azure_client.chat.completions.create(
         model=AZURE_DEPLOYMENT_NAME,
@@ -238,7 +261,7 @@ def get_available_models():
         available["gpt-4.1"] = "GPT-4.1 (Azure OpenAI)"
     
     # Check Gemini availability
-    if GEMINI_API_KEY:
+    if gemini_configured:
         available["gemini-2.5-pro"] = "Gemini 2.5 Pro (Google)"
     
     return available

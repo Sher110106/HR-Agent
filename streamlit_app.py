@@ -2,6 +2,7 @@ import streamlit as st
 import traceback
 from utils.logging_config import setup_logging, get_logger
 from utils.navigation import get_navigation_registry
+from app_core.api import initialize_clients
 
 # Set up centralized logging configuration
 setup_logging()
@@ -65,6 +66,9 @@ def main():
             layout="wide",
             initial_sidebar_state="expanded"
         )
+        
+        # Initialize API clients with Streamlit secrets
+        initialize_clients()
 
         # Hide Streamlit's built-in multipage navigation (appears automatically when a "pages/" folder is present)
         st.markdown(
