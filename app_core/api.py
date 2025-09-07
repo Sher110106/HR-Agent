@@ -56,9 +56,17 @@ def initialize_clients():
     if GEMINI_API_KEY:
         try:
             genai.configure(api_key=GEMINI_API_KEY)
-            gemini_configured = True
-            logger.info("✅ Google Gemini client initialized successfully")
+            # Perform a lightweight validation call to ensure the key/model works
+            try:
+                test_model = genai.GenerativeModel(model_name="gemini-2.5-pro")
+                _ = test_model.generate_content("ping", generation_config=genai.types.GenerationConfig(max_output_tokens=1, temperature=0))
+                gemini_configured = True
+                logger.info("✅ Google Gemini client initialized successfully")
+            except Exception as ge:
+                gemini_configured = False
+                logger.error(f"❌ Google Gemini validation failed: {ge}")
         except Exception as e:
+            gemini_configured = False
             logger.error(f"❌ Failed to initialize Google Gemini client: {e}")
     else:
         logger.warning("GEMINI_API_KEY not available. Gemini will not be available.")
@@ -84,58 +92,63 @@ def _make_azure_openai_call(messages: List[Dict], model: str, temperature: float
 
 def _make_gemini_call(messages: List[Dict], model: str, temperature: float, max_tokens: int, stream: bool):
     """Make Google Gemini API call."""
-    # Convert OpenAI format messages to Gemini format
-    gemini_messages = []
-    system_instruction = None
-    
-    for msg in messages:
-        role = msg.get('role', '')
-        content = msg.get('content', '')
-        
-        if role == 'system':
-            system_instruction = content
-        elif role == 'user':
-            gemini_messages.append({
-                'role': 'user',
-                'parts': [{'text': content}]
-            })
-        elif role == 'assistant':
-            gemini_messages.append({
-                'role': 'model',
-                'parts': [{'text': content}]
-            })
-    
-    # Create Gemini model
-    gemini_model = genai.GenerativeModel(
-        model_name=model,
-        system_instruction=system_instruction
-    )
-    
-    # Generate content
-    generation_config = genai.types.GenerationConfig(
-        temperature=temperature,
-        max_output_tokens=max_tokens,
-    )
-    
-    # If we only have a single user message, pass it directly as a string for simpler handling
-    if len(gemini_messages) == 1 and gemini_messages[0]['role'] == 'user':
-        content_to_send = gemini_messages[0]['parts'][0]['text']
-    else:
-        content_to_send = gemini_messages
-    
-    if stream:
-        response = gemini_model.generate_content(
-            content_to_send,
-            generation_config=generation_config,
-            stream=True
+    try:
+        # Convert OpenAI format messages to Gemini format
+        gemini_messages = []
+        system_instruction = None
+
+        for msg in messages:
+            role = msg.get('role', '')
+            content = msg.get('content', '')
+
+            if role == 'system':
+                system_instruction = content
+            elif role == 'user':
+                gemini_messages.append({
+                    'role': 'user',
+                    'parts': [{'text': content}]
+                })
+            elif role == 'assistant':
+                gemini_messages.append({
+                    'role': 'model',
+                    'parts': [{'text': content}]
+                })
+
+        # Create Gemini model
+        gemini_model = genai.GenerativeModel(
+            model_name=model,
+            system_instruction=system_instruction
         )
-    else:
-        response = gemini_model.generate_content(
-            content_to_send,
-            generation_config=generation_config
+
+        # Generate content
+        generation_config = genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
         )
-    
-    return response
+
+        # If we only have a single user message, pass it directly as a string for simpler handling
+        if len(gemini_messages) == 1 and gemini_messages[0]['role'] == 'user':
+            content_to_send = gemini_messages[0]['parts'][0]['text']
+        else:
+            content_to_send = gemini_messages
+
+        if stream:
+            response = gemini_model.generate_content(
+                content_to_send,
+                generation_config=generation_config,
+                stream=True
+            )
+        else:
+            response = gemini_model.generate_content(
+                content_to_send,
+                generation_config=generation_config
+            )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"❌ Gemini call failed (model={model}): {e}")
+        raise
 
 def make_llm_call(messages: List[Dict], model: str = None, 
                   temperature: float = 0.2, max_tokens: int = 4000, stream: bool = False):
