@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import List, Dict, Any, Tuple
+import time
 from openai import AzureOpenAI
 import google.generativeai as genai
 
@@ -59,12 +60,17 @@ def initialize_clients():
             # Perform a lightweight validation call to ensure the key/model works
             try:
                 test_model = genai.GenerativeModel(model_name="gemini-2.5-pro")
-                _ = test_model.generate_content("ping", generation_config=genai.types.GenerationConfig(max_output_tokens=1, temperature=0))
+                _ = test_model.generate_content(
+                    "ping",
+                    generation_config=genai.types.GenerationConfig(max_output_tokens=1, temperature=0)
+                )
                 gemini_configured = True
                 logger.info("✅ Google Gemini client initialized successfully")
             except Exception as ge:
-                gemini_configured = False
+                # Treat HTTP 500 as transient; keep Gemini enabled but warn
+                gemini_configured = True
                 logger.error(f"❌ Google Gemini validation failed: {ge}")
+                logger.warning("⚠️ Proceeding with Gemini enabled (validation failed, likely transient 5xx). Calls will retry with backoff.")
         except Exception as e:
             gemini_configured = False
             logger.error(f"❌ Failed to initialize Google Gemini client: {e}")
@@ -132,19 +138,36 @@ def _make_gemini_call(messages: List[Dict], model: str, temperature: float, max_
         else:
             content_to_send = gemini_messages
 
-        if stream:
-            response = gemini_model.generate_content(
-                content_to_send,
-                generation_config=generation_config,
-                stream=True
-            )
-        else:
-            response = gemini_model.generate_content(
-                content_to_send,
-                generation_config=generation_config
-            )
-
-        return response
+        # Exponential backoff for transient errors (e.g., 500)
+        max_attempts = 3
+        delay_seconds = 1.0
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                if stream:
+                    response = gemini_model.generate_content(
+                        content_to_send,
+                        generation_config=generation_config,
+                        stream=True
+                    )
+                else:
+                    response = gemini_model.generate_content(
+                        content_to_send,
+                        generation_config=generation_config
+                    )
+                return response
+            except Exception as inner_e:
+                # Retry on likely transient server errors
+                is_transient = any(s in str(inner_e).lower() for s in [
+                    "internal error", "500", "temporarily unavailable", "deadline exceeded", "unavailable"
+                ])
+                if attempt < max_attempts and is_transient:
+                    logger.warning(f"⚠️ Gemini attempt {attempt} failed (transient). Retrying in {delay_seconds:.1f}s: {inner_e}")
+                    time.sleep(delay_seconds)
+                    delay_seconds *= 2
+                    continue
+                raise
 
     except Exception as e:
         logger.error(f"❌ Gemini call failed (model={model}): {e}")
