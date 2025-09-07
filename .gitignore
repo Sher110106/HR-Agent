@@ -13,6 +13,7 @@ __pycache__/
 .env
 .venv
 venv/
+.streamlit/secrets.toml
 
 # IDE files
 .vscode/

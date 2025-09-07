@@ -58,11 +58,11 @@ def initialize_pandasai():
         
         # Check if Azure OpenAI is configured
         if not AZURE_API_KEY:
-            st.error("❌ Azure OpenAI API key not found. Please set AZURE_API_KEY environment variable.")
+            st.error("❌ Azure OpenAI API key not found. Please add it to Streamlit secrets under [azure].")
             return None
         
         if not AZURE_ENDPOINT:
-            st.error("❌ Azure OpenAI endpoint not found. Please set AZURE_ENDPOINT environment variable.")
+            st.error("❌ Azure OpenAI endpoint not found. Please add it to Streamlit secrets under [azure].")
             return None
         
         # Initialize Azure OpenAI LLM

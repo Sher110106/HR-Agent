@@ -42,22 +42,38 @@ def _load_secrets_to_env():
         
     try:
         import streamlit as st
-        
-        # Azure OpenAI Configuration
+
+        # --- Azure OpenAI Configuration ---
+        # Support both [azure] with snake_case keys and [azure_openai] with UPPERCASE keys
         if "azure" in st.secrets:
-            os.environ["AZURE_API_KEY"] = st.secrets["azure"]["api_key"]
-            os.environ["AZURE_ENDPOINT"] = st.secrets["azure"]["endpoint"]
-            os.environ["AZURE_API_VERSION"] = st.secrets["azure"]["api_version"]
-            os.environ["AZURE_DEPLOYMENT_NAME"] = st.secrets["azure"]["deployment_name"]
-        
-        # Google Gemini Configuration
+            azure_sec = st.secrets["azure"]
+            os.environ["AZURE_API_KEY"] = azure_sec.get("api_key", os.environ.get("AZURE_API_KEY", ""))
+            os.environ["AZURE_ENDPOINT"] = azure_sec.get("endpoint", os.environ.get("AZURE_ENDPOINT", ""))
+            os.environ["AZURE_API_VERSION"] = azure_sec.get("api_version", os.environ.get("AZURE_API_VERSION", ""))
+            os.environ["AZURE_DEPLOYMENT_NAME"] = azure_sec.get("deployment_name", os.environ.get("AZURE_DEPLOYMENT_NAME", ""))
+
+        if "azure_openai" in st.secrets:
+            azure_alt = st.secrets["azure_openai"]
+            # Accept uppercase or snake_case keys
+            os.environ["AZURE_API_KEY"] = azure_alt.get("AZURE_API_KEY", azure_alt.get("api_key", os.environ.get("AZURE_API_KEY", "")))
+            os.environ["AZURE_ENDPOINT"] = azure_alt.get("AZURE_ENDPOINT", azure_alt.get("endpoint", os.environ.get("AZURE_ENDPOINT", "")))
+            os.environ["AZURE_API_VERSION"] = azure_alt.get("AZURE_API_VERSION", azure_alt.get("api_version", os.environ.get("AZURE_API_VERSION", "")))
+            os.environ["AZURE_DEPLOYMENT_NAME"] = azure_alt.get("AZURE_DEPLOYMENT_NAME", azure_alt.get("deployment_name", os.environ.get("AZURE_DEPLOYMENT_NAME", "")))
+
+        # --- Google Gemini Configuration ---
         if "gemini" in st.secrets:
-            os.environ["GEMINI_API_KEY"] = st.secrets["gemini"]["api_key"]
-        
-        # Other Configuration
+            gemini_sec = st.secrets["gemini"]
+            os.environ["GEMINI_API_KEY"] = gemini_sec.get("api_key", os.environ.get("GEMINI_API_KEY", ""))
+
+        if "google_gemini" in st.secrets:
+            gemini_alt = st.secrets["google_gemini"]
+            os.environ["GEMINI_API_KEY"] = gemini_alt.get("GEMINI_API_KEY", gemini_alt.get("api_key", os.environ.get("GEMINI_API_KEY", "")))
+
+        # --- NVIDIA (optional) ---
         if "nvidia" in st.secrets:
-            os.environ["NVIDIA_API_KEY"] = st.secrets["nvidia"]["api_key"]
-            
+            nvidia_sec = st.secrets["nvidia"]
+            os.environ["NVIDIA_API_KEY"] = nvidia_sec.get("api_key", os.environ.get("NVIDIA_API_KEY", ""))
+
         _secrets_loaded = True
         
     except (ImportError, AttributeError, KeyError):

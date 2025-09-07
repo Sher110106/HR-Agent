@@ -255,6 +255,14 @@ def _wrap_gemini_streaming_response(gemini_stream):
 def get_available_models():
     """Get list of available models with their display names."""
     available = {}
+
+    # Ensure clients are initialized if this is called early in a rerun
+    # This helps the UI sidebar reflect availability after secrets load
+    if not azure_client and not gemini_configured:
+        try:
+            initialize_clients()
+        except Exception:
+            pass
     
     # Check Azure OpenAI availability
     if azure_client:
