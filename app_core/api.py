@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Model configuration
 SUPPORTED_MODELS = {
     "gpt-4.1": "azure_openai",
-    "gemini-2.5-pro": "google_genai"
+    "models/gemini-2.5-flash": "google_genai"
 }
 
 # Global client variables
@@ -59,7 +59,7 @@ def initialize_clients():
             genai.configure(api_key=GEMINI_API_KEY)
             # Perform a lightweight validation call to ensure the key/model works
             try:
-                test_model = genai.GenerativeModel(model_name="gemini-2.5-pro")
+                test_model = genai.GenerativeModel(model_name="models/gemini-2.5-flash")
                 _ = test_model.generate_content(
                     "ping",
                     generation_config=genai.types.GenerationConfig(max_output_tokens=1, temperature=0)
@@ -306,7 +306,7 @@ def get_available_models():
     
     # Check Gemini availability
     if gemini_configured:
-        available["gemini-2.5-pro"] = "Gemini 2.5 Pro (Google)"
+        available["models/gemini-2.5-flash"] = "Gemini 2.5 Flash (Google)"
     
     return available
 
