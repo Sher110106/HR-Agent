@@ -57,20 +57,8 @@ def initialize_clients():
     if GEMINI_API_KEY:
         try:
             genai.configure(api_key=GEMINI_API_KEY)
-            # Perform a lightweight validation call to ensure the key/model works
-            try:
-                test_model = genai.GenerativeModel(model_name="models/gemini-2.5-flash")
-                _ = test_model.generate_content(
-                    "ping",
-                    generation_config=genai.types.GenerationConfig(max_output_tokens=1, temperature=0)
-                )
-                gemini_configured = True
-                logger.info("✅ Google Gemini client initialized successfully")
-            except Exception as ge:
-                # Treat HTTP 500 as transient; keep Gemini enabled but warn
-                gemini_configured = True
-                logger.error(f"❌ Google Gemini validation failed: {ge}")
-                logger.warning("⚠️ Proceeding with Gemini enabled (validation failed, likely transient 5xx). Calls will retry with backoff.")
+            gemini_configured = True
+            logger.info("✅ Google Gemini client initialized successfully")
         except Exception as e:
             gemini_configured = False
             logger.error(f"❌ Failed to initialize Google Gemini client: {e}")
