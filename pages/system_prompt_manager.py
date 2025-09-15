@@ -266,16 +266,51 @@ def render_import_export_section():
             if success:
                 st.success(f"✅ Exported to {filename}")
                 
-                # Provide download button
+                # Provide download buttons
                 try:
                     with open(filename, "r") as f:
-                        data = f.read()
-                    st.download_button(
-                        "⬇️ Download Export File",
-                        data=data,
-                        file_name=filename,
-                        mime="application/json"
-                    )
+                        json_data = f.read()
+                    
+                    # Create two columns for download options
+                    json_col, docx_col = st.columns(2)
+                    
+                    with json_col:
+                        st.download_button(
+                            "⬇️ JSON",
+                            data=json_data,
+                            file_name=filename,
+                            mime="application/json",
+                            use_container_width=True
+                        )
+                    
+                    with docx_col:
+                        # Convert JSON to readable DOCX format
+                        from utils.docx_utils import text_to_docx
+                        import json
+                        
+                        # Parse JSON and create readable text
+                        prompts_data = json.loads(json_data)
+                        readable_text = "Exported System Prompts\n\n"
+                        
+                        for prompt_name, prompt_info in prompts_data.items():
+                            readable_text += f"## {prompt_name}\n"
+                            if 'description' in prompt_info:
+                                readable_text += f"Description: {prompt_info['description']}\n\n"
+                            if 'prompt' in prompt_info:
+                                readable_text += f"Prompt:\n{prompt_info['prompt']}\n\n"
+                            if 'tags' in prompt_info:
+                                readable_text += f"Tags: {', '.join(prompt_info['tags'])}\n\n"
+                            readable_text += "---\n\n"
+                        
+                        docx_data = text_to_docx(readable_text, title="Exported System Prompts")
+                        st.download_button(
+                            "📝 DOCX",
+                            data=docx_data,
+                            file_name="exported_prompts.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True
+                        )
+                        
                 except Exception as e:
                     st.error(f"❌ Export file error: {e}")
             else:

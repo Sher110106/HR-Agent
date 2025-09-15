@@ -1,242 +1,328 @@
 """
-Performance metrics tracking system for the Data Analysis Agent.
-Tracks response times, token usage, error rates, and system health.
+Enhanced metrics collection for comprehensive system monitoring.
+
+This module provides detailed metrics collection for agent operations,
+performance monitoring, and system health tracking.
 """
 
 import time
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
+from contextlib import contextmanager
 from threading import Lock
-import json
+import psutil
 import os
 
 logger = logging.getLogger(__name__)
 
 @dataclass
-class MetricEvent:
-    """Individual metric event record."""
-    timestamp: datetime
-    event_type: str  # 'api_call', 'code_execution', 'error', 'system_health'
-    duration_ms: Optional[float] = None
-    tokens_used: Optional[int] = None
-    success: bool = True
+class AgentMetrics:
+    """Metrics for individual agent operations."""
+    agent_name: str
+    operation: str
+    session_id: Optional[str] = None
+    start_time: datetime = field(default_factory=datetime.now)
+    end_time: Optional[datetime] = None
+    duration: Optional[float] = None
+    success: bool = False
     error_type: Optional[str] = None
+    error_message: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def complete(self, success: bool, error_type: Optional[str] = None, 
+                error_message: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None):
+        """Complete the metric recording."""
+        self.end_time = datetime.now()
+        self.duration = (self.end_time - self.start_time).total_seconds()
+        self.success = success
+        self.error_type = error_type
+        self.error_message = error_message
+        if metadata:
+            self.metadata.update(metadata)
 
 class MetricsCollector:
-    """Thread-safe metrics collection and reporting system."""
+    """Comprehensive metrics collection system."""
     
-    def __init__(self, max_events: int = 1000):
-        self.events: List[MetricEvent] = []
-        self.max_events = max_events
+    def __init__(self):
+        self.agent_metrics: Dict[str, AgentMetrics] = {}
+        self.system_metrics: Dict[str, Any] = {}
+        self.performance_metrics: Dict[str, float] = {}
         self._lock = Lock()
-        self._session_start = datetime.now()
+        self._initialize_metrics()
         logger.info("📊 MetricsCollector initialized")
     
-    def record_api_call(self, duration_ms: float, tokens_used: int, success: bool = True, 
-                       error_type: Optional[str] = None, metadata: Optional[Dict] = None):
-        """Record an API call metric."""
-        event = MetricEvent(
-            timestamp=datetime.now(),
-            event_type='api_call',
-            duration_ms=duration_ms,
-            tokens_used=tokens_used,
-            success=success,
-            error_type=error_type,
-            metadata=metadata or {}
-        )
-        self._add_event(event)
-        logger.debug(f"📊 API call recorded: {duration_ms:.1f}ms, {tokens_used} tokens, success={success}")
-    
-    def record_code_execution(self, duration_ms: float, success: bool = True, 
-                            error_type: Optional[str] = None, metadata: Optional[Dict] = None):
-        """Record a code execution metric."""
-        event = MetricEvent(
-            timestamp=datetime.now(),
-            event_type='code_execution',
-            duration_ms=duration_ms,
-            success=success,
-            error_type=error_type,
-            metadata=metadata or {}
-        )
-        self._add_event(event)
-        logger.debug(f"📊 Code execution recorded: {duration_ms:.1f}ms, success={success}")
-    
-    def record_error(self, error_type: str, metadata: Optional[Dict] = None):
-        """Record an error event."""
-        event = MetricEvent(
-            timestamp=datetime.now(),
-            event_type='error',
-            success=False,
-            error_type=error_type,
-            metadata=metadata or {}
-        )
-        self._add_event(event)
-        logger.warning(f"📊 Error recorded: {error_type}")
-    
-    def record_system_health(self, cpu_usage: float, memory_usage: float, 
-                           active_sessions: int, metadata: Optional[Dict] = None):
-        """Record system health metrics."""
-        event = MetricEvent(
-            timestamp=datetime.now(),
-            event_type='system_health',
-            metadata={
-                'cpu_usage': cpu_usage,
-                'memory_usage': memory_usage,
-                'active_sessions': active_sessions,
-                **(metadata or {})
-            }
-        )
-        self._add_event(event)
-        logger.debug(f"📊 System health recorded: CPU={cpu_usage:.1f}%, MEM={memory_usage:.1f}%")
-    
-    def _add_event(self, event: MetricEvent):
-        """Thread-safe event addition with size limit."""
-        with self._lock:
-            self.events.append(event)
-            if len(self.events) > self.max_events:
-                # Remove oldest events
-                self.events = self.events[-self.max_events:]
-    
-    def get_summary(self, hours_back: int = 24) -> Dict[str, Any]:
-        """Get performance summary for the specified time period."""
-        cutoff_time = datetime.now() - timedelta(hours=hours_back)
-        
-        with self._lock:
-            recent_events = [e for e in self.events if e.timestamp >= cutoff_time]
-        
-        if not recent_events:
-            return {"message": "No events in specified time period"}
-        
-        # Calculate metrics
-        api_calls = [e for e in recent_events if e.event_type == 'api_call']
-        code_executions = [e for e in recent_events if e.event_type == 'code_execution']
-        errors = [e for e in recent_events if e.event_type == 'error']
-        
-        summary = {
-            "time_period_hours": hours_back,
-            "session_uptime_minutes": (datetime.now() - self._session_start).total_seconds() / 60,
-            "total_events": len(recent_events),
-            "api_calls": {
-                "count": len(api_calls),
-                "success_rate": sum(1 for e in api_calls if e.success) / len(api_calls) if api_calls else 0,
-                "avg_response_time_ms": sum(e.duration_ms for e in api_calls if e.duration_ms) / len(api_calls) if api_calls else 0,
-                "total_tokens": sum(e.tokens_used for e in api_calls if e.tokens_used),
-                "avg_tokens_per_call": sum(e.tokens_used for e in api_calls if e.tokens_used) / len(api_calls) if api_calls else 0
-            },
-            "code_executions": {
-                "count": len(code_executions),
-                "success_rate": sum(1 for e in code_executions if e.success) / len(code_executions) if code_executions else 0,
-                "avg_execution_time_ms": sum(e.duration_ms for e in code_executions if e.duration_ms) / len(code_executions) if code_executions else 0
-            },
-            "errors": {
-                "count": len(errors),
-                "error_rate": len(errors) / len(recent_events) if recent_events else 0,
-                "top_error_types": self._get_top_errors(errors)
-            }
+    def _initialize_metrics(self):
+        """Initialize default metrics."""
+        self.system_metrics = {
+            'total_agent_operations': 0,
+            'successful_operations': 0,
+            'failed_operations': 0,
+            'total_execution_time': 0.0,
+            'average_execution_time': 0.0,
+            'peak_memory_usage': 0.0,
+            'current_memory_usage': 0.0,
+            'cpu_usage': 0.0,
+            'active_sessions': 0,
+            'cache_hit_rate': 0.0,
+            'circuit_breaker_trips': 0,
+            'last_updated': datetime.now().isoformat()
         }
-        
-        return summary
     
-    def _get_top_errors(self, errors: List[MetricEvent], top_n: int = 5) -> List[Dict[str, Any]]:
-        """Get the most frequent error types."""
-        error_counts = {}
-        for error in errors:
-            error_type = error.error_type or "unknown"
-            error_counts[error_type] = error_counts.get(error_type, 0) + 1
+    def record_agent_operation(self, agent_name: str, operation: str, 
+                              session_id: Optional[str] = None) -> str:
+        """Record the start of an agent operation."""
+        metric_id = f"{agent_name}_{operation}_{int(time.time() * 1000)}"
         
-        sorted_errors = sorted(error_counts.items(), key=lambda x: x[1], reverse=True)
-        return [{"type": error_type, "count": count} for error_type, count in sorted_errors[:top_n]]
-    
-    def export_metrics(self, filepath: str):
-        """Export metrics to JSON file."""
         with self._lock:
-            data = {
-                "session_start": self._session_start.isoformat(),
-                "export_time": datetime.now().isoformat(),
-                "events": [
-                    {
-                        "timestamp": e.timestamp.isoformat(),
-                        "event_type": e.event_type,
-                        "duration_ms": e.duration_ms,
-                        "tokens_used": e.tokens_used,
-                        "success": e.success,
-                        "error_type": e.error_type,
-                        "metadata": e.metadata
-                    }
-                    for e in self.events
-                ]
+            metric = AgentMetrics(
+                agent_name=agent_name,
+                operation=operation,
+                session_id=session_id
+            )
+            self.agent_metrics[metric_id] = metric
+            self.system_metrics['total_agent_operations'] += 1
+        
+        logger.debug(f"📊 Started recording metrics for {agent_name}.{operation}")
+        return metric_id
+    
+    def complete_agent_operation(self, metric_id: str, success: bool, 
+                               error_type: Optional[str] = None,
+                               error_message: Optional[str] = None,
+                               metadata: Optional[Dict[str, Any]] = None):
+        """Complete the recording of an agent operation."""
+        with self._lock:
+            if metric_id in self.agent_metrics:
+                metric = self.agent_metrics[metric_id]
+                metric.complete(success, error_type, error_message, metadata)
+                
+                # Update system metrics
+                if success:
+                    self.system_metrics['successful_operations'] += 1
+                else:
+                    self.system_metrics['failed_operations'] += 1
+                
+                if metric.duration:
+                    self.system_metrics['total_execution_time'] += metric.duration
+                    self.system_metrics['average_execution_time'] = (
+                        self.system_metrics['total_execution_time'] / 
+                        self.system_metrics['total_agent_operations']
+                    )
+                
+                self.system_metrics['last_updated'] = datetime.now().isoformat()
+                
+                logger.debug(f"📊 Completed metrics for {metric.agent_name}.{metric.operation} "
+                           f"({'success' if success else 'failed'})")
+    
+    def record_performance_metric(self, metric_name: str, value: float):
+        """Record a performance metric."""
+        with self._lock:
+            self.performance_metrics[metric_name] = value
+            logger.debug(f"📊 Recorded performance metric: {metric_name} = {value}")
+    
+    def record_system_health(self):
+        """Record current system health metrics."""
+        try:
+            process = psutil.Process(os.getpid())
+            memory_info = process.memory_info()
+            
+            with self._lock:
+                self.system_metrics['current_memory_usage'] = memory_info.rss / 1024 / 1024  # MB
+                self.system_metrics['peak_memory_usage'] = max(
+                    self.system_metrics['peak_memory_usage'],
+                    self.system_metrics['current_memory_usage']
+                )
+                self.system_metrics['cpu_usage'] = process.cpu_percent()
+                self.system_metrics['last_updated'] = datetime.now().isoformat()
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to record system health: {e}")
+    
+    def record_cache_metrics(self, hit_rate: float):
+        """Record cache performance metrics."""
+        with self._lock:
+            self.system_metrics['cache_hit_rate'] = hit_rate
+    
+    def record_circuit_breaker_trip(self):
+        """Record a circuit breaker trip."""
+        with self._lock:
+            self.system_metrics['circuit_breaker_trips'] += 1
+    
+    def get_agent_metrics(self, agent_name: Optional[str] = None, 
+                         session_id: Optional[str] = None) -> Dict[str, AgentMetrics]:
+        """Get metrics filtered by agent name and/or session ID."""
+        with self._lock:
+            filtered_metrics = {}
+            for metric_id, metric in self.agent_metrics.items():
+                if agent_name and metric.agent_name != agent_name:
+                    continue
+                if session_id and metric.session_id != session_id:
+                    continue
+                filtered_metrics[metric_id] = metric
+            return filtered_metrics
+    
+    def get_agent_summary(self, agent_name: str) -> Dict[str, Any]:
+        """Get summary statistics for a specific agent."""
+        agent_metrics = self.get_agent_metrics(agent_name=agent_name)
+        
+        if not agent_metrics:
+            return {}
+        
+        total_operations = len(agent_metrics)
+        successful_operations = sum(1 for m in agent_metrics.values() if m.success)
+        failed_operations = total_operations - successful_operations
+        total_duration = sum(m.duration or 0 for m in agent_metrics.values())
+        avg_duration = total_duration / total_operations if total_operations > 0 else 0
+        
+        return {
+            'agent_name': agent_name,
+            'total_operations': total_operations,
+            'successful_operations': successful_operations,
+            'failed_operations': failed_operations,
+            'success_rate': successful_operations / total_operations if total_operations > 0 else 0,
+            'total_duration': total_duration,
+            'average_duration': avg_duration,
+            'operations': list(agent_metrics.values())
+        }
+    
+    def get_system_summary(self) -> Dict[str, Any]:
+        """Get comprehensive system summary."""
+        with self._lock:
+            # Update system health
+            self.record_system_health()
+            
+            return {
+                'system_metrics': dict(self.system_metrics),
+                'performance_metrics': dict(self.performance_metrics),
+                'total_agent_metrics': len(self.agent_metrics),
+                'last_updated': datetime.now().isoformat()
             }
+    
+    def cleanup_old_metrics(self, max_age_hours: int = 24):
+        """Clean up old metrics to prevent memory bloat."""
+        cutoff_time = datetime.now().timestamp() - (max_age_hours * 3600)
         
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        logger.info(f"📊 Metrics exported to {filepath}")
+        with self._lock:
+            old_metrics = [
+                metric_id for metric_id, metric in self.agent_metrics.items()
+                if metric.start_time.timestamp() < cutoff_time
+            ]
+            
+            for metric_id in old_metrics:
+                del self.agent_metrics[metric_id]
+            
+            if old_metrics:
+                logger.info(f"🧹 Cleaned up {len(old_metrics)} old metrics")
 
-class MetricsTimer:
-    """Context manager for timing operations."""
-    
-    def __init__(self, collector: MetricsCollector, operation_type: str, metadata: Optional[Dict] = None):
-        self.collector = collector
-        self.operation_type = operation_type
-        self.metadata = metadata or {}
-        self.start_time = None
-        self.success = True
-        self.error_type = None
-    
-    def __enter__(self):
-        self.start_time = time.time()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        duration_ms = (time.time() - self.start_time) * 1000
-        
-        if exc_type is not None:
-            self.success = False
-            self.error_type = exc_type.__name__
-        
-        if self.operation_type == 'api_call':
-            tokens = self.metadata.get('tokens_used', 0)
-            self.collector.record_api_call(
-                duration_ms=duration_ms,
-                tokens_used=tokens,
-                success=self.success,
-                error_type=self.error_type,
-                metadata=self.metadata
-            )
-        elif self.operation_type == 'code_execution':
-            self.collector.record_code_execution(
-                duration_ms=duration_ms,
-                success=self.success,
-                error_type=self.error_type,
-                metadata=self.metadata
-            )
-    
-    def set_tokens_used(self, tokens: int):
-        """Set token usage for API calls."""
-        self.metadata['tokens_used'] = tokens
+# Global metrics collector
+_metrics_collector = None
 
-# Global metrics collector instance
-metrics_collector = MetricsCollector()
+def get_metrics_collector() -> MetricsCollector:
+    """Get the global metrics collector."""
+    global _metrics_collector
+    if _metrics_collector is None:
+        _metrics_collector = MetricsCollector()
+    return _metrics_collector
 
+@contextmanager
+def agent_operation_timer(agent_name: str, operation: str, session_id: Optional[str] = None):
+    """Context manager for timing agent operations."""
+    collector = get_metrics_collector()
+    metric_id = collector.record_agent_operation(agent_name, operation, session_id)
+    
+    try:
+        yield metric_id
+        collector.complete_agent_operation(metric_id, success=True)
+    except Exception as e:
+        collector.complete_agent_operation(
+            metric_id, 
+            success=False, 
+            error_type=type(e).__name__,
+            error_message=str(e)
+        )
+        raise
+
+def record_agent_interaction(agent_name: str, session_id: str, operation: str, 
+                           success: bool, duration: float):
+    """Record agent interaction for metrics."""
+    collector = get_metrics_collector()
+    metric_id = f"{agent_name}_{operation}_{int(time.time() * 1000)}"
+    
+    collector.complete_agent_operation(
+        metric_id,
+        success=success,
+        metadata={'duration': duration, 'session_id': session_id}
+    )
+
+# Legacy timer functions for backward compatibility
+@contextmanager
+def api_call_timer():
+    """Timer for API calls."""
+    start_time = time.time()
+    timer = type('Timer', (), {
+        'set_tokens_used': lambda self, tokens: setattr(self, 'tokens_used', tokens),
+        'tokens_used': 0
+    })()
+    
+    try:
+        yield timer
+    finally:
+        duration = time.time() - start_time
+        get_metrics_collector().record_performance_metric('api_call_duration', duration)
+
+@contextmanager
+def code_execution_timer():
+    """Timer for code execution."""
+    start_time = time.time()
+    timer = type('Timer', (), {
+        'metadata': {},
+        'set_tokens_used': lambda self, tokens: setattr(self, 'tokens_used', tokens),
+        'tokens_used': 0
+    })()
+    
+    try:
+        yield timer
+    finally:
+        duration = time.time() - start_time
+        get_metrics_collector().record_performance_metric('code_execution_duration', duration)
+
+def record_error(error_type: str, metadata: Dict[str, Any]):
+    """Record an error for metrics."""
+    get_metrics_collector().record_performance_metric(f'error_{error_type}', 1)
+
+# Legacy functions for backward compatibility
 def get_metrics_summary(hours_back: int = 24) -> Dict[str, Any]:
-    """Get performance metrics summary."""
-    return metrics_collector.get_summary(hours_back)
+    """Get performance metrics summary (legacy function for backward compatibility)."""
+    collector = get_metrics_collector()
+    system_summary = collector.get_system_summary()
+    
+    # Format for backward compatibility
+    return {
+        "time_period_hours": hours_back,
+        "session_uptime_minutes": 0,  # Not tracked in new system
+        "total_events": system_summary['total_agent_metrics'],
+        "api_calls": {
+            "count": system_summary['system_metrics'].get('total_agent_operations', 0),
+            "success_rate": system_summary['system_metrics'].get('successful_operations', 0) / 
+                          max(system_summary['system_metrics'].get('total_agent_operations', 1), 1),
+            "avg_response_time_ms": system_summary['system_metrics'].get('average_execution_time', 0) * 1000,
+            "total_tokens": 0,  # Not tracked in new system
+            "avg_tokens_per_call": 0  # Not tracked in new system
+        },
+        "code_executions": {
+            "count": system_summary['system_metrics'].get('total_agent_operations', 0),
+            "success_rate": system_summary['system_metrics'].get('successful_operations', 0) / 
+                          max(system_summary['system_metrics'].get('total_agent_operations', 1), 1),
+            "avg_execution_time_ms": system_summary['system_metrics'].get('average_execution_time', 0) * 1000
+        },
+        "errors": {
+            "count": system_summary['system_metrics'].get('failed_operations', 0),
+            "error_rate": system_summary['system_metrics'].get('failed_operations', 0) / 
+                        max(system_summary['system_metrics'].get('total_agent_operations', 1), 1),
+            "top_error_types": []  # Not tracked in new system
+        }
+    }
 
-def api_call_timer(metadata: Optional[Dict] = None) -> MetricsTimer:
-    """Context manager for timing API calls."""
-    return MetricsTimer(metrics_collector, 'api_call', metadata)
-
-def code_execution_timer(metadata: Optional[Dict] = None) -> MetricsTimer:
-    """Context manager for timing code execution."""
-    return MetricsTimer(metrics_collector, 'code_execution', metadata)
-
-def record_error(error_type: str, metadata: Optional[Dict] = None):
-    """Record an error event."""
-    metrics_collector.record_error(error_type, metadata)
-
-def export_metrics(filepath: str = "metrics_export.json"):
-    """Export metrics to file."""
-    metrics_collector.export_metrics(filepath)
+# Legacy global instance for backward compatibility
+metrics_collector = get_metrics_collector()

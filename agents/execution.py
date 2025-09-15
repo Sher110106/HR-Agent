@@ -12,8 +12,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import re
+import plotly.graph_objects as go
 
-from app_core.helpers import smart_date_parser
+from agents.data_analysis import smart_date_parser
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,76 @@ def validate_pandas_code(code: str) -> tuple[list, str]:
     # Fix unsafe DataFrame slicing
     if "[df[" in code and ".copy()" not in code and "=" in code:
         warnings.append("🔧 Auto-suggestion: Consider using .copy() when creating DataFrame subsets to avoid warnings")
+    
+    # CRITICAL: Fix pd.cut binning errors
+    
+    # Pattern to match pd.cut with bins and labels
+    cut_pattern = r'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*(\[[^\]]+\])\s*,\s*labels\s*=\s*(\[[^\]]+\])'
+    matches = re.findall(cut_pattern, code)
+    
+    for match in matches:
+        try:
+            # Parse bins and labels
+            bins_str = match[1]
+            labels_str = match[2]
+            
+            # Count bins and labels
+            bins_count = len(eval(bins_str))  # Safe since we're parsing our own code
+            labels_count = len(eval(labels_str))
+            
+            if labels_count != bins_count - 1:
+                warnings.append(f"🔧 CRITICAL: Fixed pd.cut binning error - labels count ({labels_count}) must equal bins count ({bins_count}) - 1")
+                
+                # Fix the code by either removing labels or adjusting them
+                if labels_count > bins_count - 1:
+                    # Too many labels, remove the extra ones
+                    new_labels = eval(labels_str)[:bins_count-1]
+                    new_labels_str = str(new_labels)
+                    corrected_code = corrected_code.replace(labels_str, new_labels_str)
+                else:
+                    # Too few labels, use automatic binning without labels
+                    corrected_code = re.sub(
+                        r'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*(\[[^\]]+\])\s*,\s*labels\s*=\s*(\[[^\]]+\])',
+                        r'pd.cut(\1, bins=\2)',  # Remove labels parameter
+                        corrected_code
+                    )
+                    
+        except Exception as e:
+            warnings.append(f"⚠️ Could not parse pd.cut parameters: {e}")
+    
+    # Also check for pd.cut with mismatched bin edges and labels in different patterns
+    # Pattern for pd.cut with separate bin definitions
+    cut_separate_pattern = r'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*([^,]+)\s*,\s*labels\s*=\s*([^,)]+)'
+    separate_matches = re.findall(cut_separate_pattern, code)
+    
+    for match in separate_matches:
+        try:
+            bins_var = match[1].strip()
+            labels_var = match[2].strip()
+            
+            # Look for bin and label definitions in the code
+            bins_def_pattern = rf'{bins_var}\s*=\s*(\[[^\]]+\])'
+            labels_def_pattern = rf'{labels_var}\s*=\s*(\[[^\]]+\])'
+            
+            bins_match = re.search(bins_def_pattern, code)
+            labels_match = re.search(labels_def_pattern, code)
+            
+            if bins_match and labels_match:
+                bins_count = len(eval(bins_match.group(1)))
+                labels_count = len(eval(labels_match.group(1)))
+                
+                if labels_count != bins_count - 1:
+                    warnings.append(f"🔧 CRITICAL: Fixed pd.cut binning error in variable definitions - labels count ({labels_count}) must equal bins count ({bins_count}) - 1")
+                    
+                    # Fix by removing labels parameter
+                    corrected_code = re.sub(
+                        rf'pd\.cut\s*\(\s*([^,]+)\s*,\s*bins\s*=\s*{bins_var}\s*,\s*labels\s*=\s*{labels_var}',
+                        rf'pd.cut(\1, bins={bins_var}',
+                        corrected_code
+                    )
+                    
+        except Exception as e:
+            warnings.append(f"⚠️ Could not parse separate pd.cut parameters: {e}")
     
     return warnings, corrected_code
 
@@ -74,18 +146,57 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         
         # Import helper functions for enhanced plotting
         try:
-            from utils.plot_helpers import (
-                add_value_labels, format_axis_labels,
-                apply_professional_styling, get_professional_colors
+            # Import from plot_migration_shims for Plotly-based functions
+            from utils.plot_migration_shims import (
+                create_clean_bar_chart, create_clean_line_chart, create_clean_scatter_plot,
+                create_clean_histogram, create_clean_box_plot, create_clean_pie_chart, 
+                create_clean_violin_plot, apply_professional_styling, format_axis_labels,
+                get_professional_colors, safe_color_access, create_category_palette, 
+                optimize_figure_size, add_value_labels, handle_seaborn_warnings, safe_binning
             )
-            env["add_value_labels"] = add_value_labels
+            # Import remaining functions from plot_helpers that aren't in shims
+            from utils.plot_helpers import (
+                create_clean_heatmap, smart_categorical_plot, smart_annotate_points
+            )
             env["format_axis_labels"] = format_axis_labels
             env["apply_professional_styling"] = apply_professional_styling 
             env["get_professional_colors"] = get_professional_colors
+            env["safe_color_access"] = safe_color_access
+            env["create_category_palette"] = create_category_palette
+            env["optimize_figure_size"] = optimize_figure_size
+            env["safe_binning"] = safe_binning
+            env["create_clean_bar_chart"] = create_clean_bar_chart
+            env["create_clean_line_chart"] = create_clean_line_chart
+            env["create_clean_scatter_plot"] = create_clean_scatter_plot
+            env["create_clean_histogram"] = create_clean_histogram
+            env["create_clean_box_plot"] = create_clean_box_plot
+            env["create_clean_violin_plot"] = create_clean_violin_plot
+            env["create_clean_heatmap"] = create_clean_heatmap
+            env["create_clean_pie_chart"] = create_clean_pie_chart
+            env["add_value_labels"] = add_value_labels
+            env["smart_categorical_plot"] = smart_categorical_plot
+            env["handle_seaborn_warnings"] = handle_seaborn_warnings
+            env["smart_annotate_points"] = smart_annotate_points
+            
             logger.info("🎨 Plot environment set up with matplotlib, seaborn, and helper functions")
         except ImportError as e:
             logger.warning(f"⚠️ Could not import plot helpers: {e}")
             logger.info("🎨 Plot environment set up with matplotlib and seaborn only")
+            
+            # Add fallback safe_binning function if import fails
+            def fallback_safe_binning(data, bins, labels=None, method='cut', **kwargs):
+                """Fallback safe_binning function if import fails."""
+                try:
+                    if method == 'cut':
+                        return pd.cut(data, bins=bins, labels=labels, **kwargs)
+                    elif method == 'qcut':
+                        return pd.qcut(data, q=bins, labels=labels, **kwargs)
+                    else:
+                        return pd.cut(data, bins=5)
+                except Exception:
+                    return pd.cut(data, bins=5)
+            
+            env["safe_binning"] = fallback_safe_binning
     
     try:
         logger.info("🚀 Executing code...")
@@ -96,10 +207,19 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
         if result is not None:
             result_type = type(result).__name__
             
+            # Check for multi-graph results first
+            from utils.plot_helpers import detect_multi_graph_result
+            is_multi_graph, figures, data_dfs = detect_multi_graph_result(result)
+            
+            if is_multi_graph:
+                logger.info(f"✅ Execution successful: Multi-graph result with {len(figures)} figures")
+                logger.info("🎯 Multi-graph format detected")
+                return result  # Return the multi-graph result as-is
+            
             # Check for new tuple format (fig, data_df)
             if isinstance(result, tuple) and len(result) == 2:
                 fig, data = result
-                if isinstance(fig, (plt.Figure, plt.Axes)) and isinstance(data, pd.DataFrame):
+                if isinstance(fig, (plt.Figure, plt.Axes, go.Figure)) and isinstance(data, pd.DataFrame):
                     logger.info(f"✅ Execution successful: Tuple with plot figure and DataFrame ({len(data)} rows, {len(data.columns)} columns)")
                     logger.info("🎯 New dual-output format detected - plot with underlying data")
                     return result  # Return the tuple as-is
@@ -111,7 +231,7 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
                 logger.info(f"✅ Execution successful: DataFrame with {len(result)} rows, {len(result.columns)} columns")
             elif isinstance(result, pd.Series):
                 logger.info(f"✅ Execution successful: Series with {len(result)} elements")
-            elif isinstance(result, (plt.Figure, plt.Axes)):
+            elif isinstance(result, (plt.Figure, plt.Axes, go.Figure)):
                 logger.info(f"✅ Execution successful: {result_type} plot object (legacy format)")
             else:
                 logger.info(f"✅ Execution successful: {result_type} = {str(result)[:100]}...")
@@ -137,5 +257,18 @@ def ExecutionAgent(code: str, df: pd.DataFrame, should_plot: bool):
             error_msg += f"\n💡 Tip: Use .copy() when creating DataFrame subsets or .loc[] for safe assignments"
         elif "'int' object has no attribute" in str(exc):
             error_msg += f"\n💡 Tip: Check your method chaining - you may be calling a method on an integer instead of a pandas object"
+        elif "Bin labels must be one fewer than the number of bin edges" in str(exc):
+            error_msg += f"\n💡 CRITICAL: pd.cut() binning error detected. The number of labels must equal the number of bins minus 1."
+            error_msg += f"\n💡 Example: bins=[0,1,3,5] (4 bins) needs labels=['0-1','1-3','3-5'] (3 labels)"
+            error_msg += f"\n💡 Fix: Use automatic binning without labels: pd.cut(df['col'], bins=5)"
+            error_msg += f"\n💡 Or ensure labels count = bins count - 1"
+        elif "bin edges" in str(exc).lower():
+            error_msg += f"\n💡 Binning error detected. Check your pd.cut() or pd.qcut() parameters."
+            error_msg += f"\n💡 For automatic binning: pd.cut(df['col'], bins=5)"
+            error_msg += f"\n💡 For custom bins: ensure labels count = bins count - 1"
+        elif "No module named 'utils.safe_binning'" in str(exc):
+            error_msg += f"\n💡 Import error detected. The safe_binning function is available directly in the execution environment."
+            error_msg += f"\n💡 Use: safe_binning(data, bins, labels=None, method='cut') directly without import."
+            error_msg += f"\n💡 Example: df['bins'] = safe_binning(df['col'], bins=5)"
         
         return error_msg 

@@ -1,5 +1,6 @@
 # Log files
 *.log
+.Test.md
 
 # Python cache
 __pycache__/
@@ -11,6 +12,8 @@ __pycache__/
 # Environment variables
 .env
 .venv
+venv/
+.streamlit/secrets.toml
 
 # IDE files
 .vscode/

@@ -26,26 +26,128 @@ def ReasoningCurator(query: str, result: Any) -> str:
     """
     logger.info(f"🎯 ReasoningCurator: Crafting prompt for query: '{query}'")
     
-    # Determine result type and create appropriate context
-    if isinstance(result, str) and result.startswith("Error executing code"):
+    # Import multi-graph detection
+    from utils.plot_helpers import detect_multi_graph_result
+    
+    # Check if this is a multi-graph result first
+    is_multi_graph, figures, data_dfs = detect_multi_graph_result(result)
+    
+    if is_multi_graph:
+        result_type = "multi-graph visualization"
+        result_context = f"""This is a multi-graph result containing {len(figures)} visualizations.
+
+MULTI-GRAPH ANALYSIS:
+You have access to {len(figures)} different charts/plots that were created to answer the user's query.
+
+UNDERLYING DATA FOR EACH CHART:"""
+        
+        # Add data for each figure
+        for i, fig in enumerate(figures):
+            data_df = data_dfs[i] if data_dfs and i < len(data_dfs) else None
+            
+            if data_df is not None and hasattr(data_df, 'to_string'):
+                result_context += f"""
+
+CHART {i+1} DATA:
+{data_df.to_string(max_rows=15, max_cols=8)}"""
+            else:
+                # Extract data from Plotly figure if available
+                extracted_data = []
+                if hasattr(fig, 'data') and fig.data:
+                    for j, trace in enumerate(fig.data):
+                        trace_data = {}
+                        if hasattr(trace, 'x') and trace.x is not None:
+                            trace_data['x'] = list(trace.x)
+                        if hasattr(trace, 'y') and trace.y is not None:
+                            trace_data['y'] = list(trace.y)
+                        if hasattr(trace, 'name') and trace.name:
+                            trace_data['name'] = trace.name
+                        if hasattr(trace, 'type'):
+                            trace_data['type'] = trace.type
+                        
+                        if trace_data:
+                            extracted_data.append(trace_data)
+                
+                if extracted_data:
+                    result_context += f"""
+
+CHART {i+1} EXTRACTED DATA:
+Chart Type: {extracted_data[0].get('type', 'unknown')}
+Data Points: {len(extracted_data[0].get('x', []))} values"""
+                    
+                    # Add sample data values
+                    for j, trace_data in enumerate(extracted_data):
+                        if 'x' in trace_data and 'y' in trace_data:
+                            result_context += f"""
+Trace {j+1} ({trace_data.get('type', 'unknown')}):
+X values: {trace_data['x'][:5]}...
+Y values: {trace_data['y'][:5]}..."""
+                        elif 'x' in trace_data:
+                            result_context += f"""
+Trace {j+1} ({trace_data.get('type', 'unknown')}):
+Values: {trace_data['x'][:5]}..."""
+                else:
+                    result_context += f"""
+
+CHART {i+1}: No specific data available, but you can analyze the visual patterns."""
+        
+        result_context += f"""
+
+ANALYSIS REQUIREMENTS:
+- Analyze each chart individually and explain what it shows
+- Identify relationships between the different charts
+- Provide insights based on the combined multi-graph analysis
+- Reference specific data values from each chart's underlying data
+- Explain how the multiple visualizations work together to answer the user's query"""
+        
+        logger.info(f"🎯 Multi-graph result detected: {len(figures)} figures with data")
+    
+    elif isinstance(result, str) and result.startswith("Error executing code"):
         result_type = "execution error"
         result_context = f"The code execution failed with the following error:\n{result}"
         logger.info("🎯 Error result detected")
     
     elif isinstance(result, tuple) and len(result) == 2:
-        # New dual-output format: (fig, data_df)
-        fig, data_df = result
-        if isinstance(fig, (plt.Figure, plt.Axes)) and hasattr(data_df, 'to_string'):
-            result_type = "dual output (plot + data)"
-            result_context = f"""This is a dual-output result containing both a visualization and the underlying data.
+        # New dual-output format: (fig, data_df) or (fig, dict_of_dataframes)
+        fig, data_content = result
+        if isinstance(fig, (plt.Figure, plt.Axes)):
+            if hasattr(data_content, 'to_string'):  # DataFrame
+                result_type = "dual output (plot + data)"
+                result_context = f"""This is a dual-output result containing both a visualization and the underlying data.
 
 PLOT: A {type(fig).__name__} showing the visualization requested by the user.
 
 UNDERLYING DATA:
-{data_df.to_string(max_rows=20, max_cols=10)}
+{data_content.to_string(max_rows=20, max_cols=10)}
 
 You have access to both the visual representation AND the specific numerical values. Use both in your analysis."""
-            logger.info(f"🎯 Dual-output result detected: plot + data with {len(data_df)} rows")
+                logger.info(f"🎯 Dual-output result detected: plot + data with {len(data_content)} rows")
+            elif isinstance(data_content, dict):
+                # Dictionary of DataFrames
+                result_type = "dual output (plot + multiple datasets)"
+                data_summary = []
+                data_details = []
+                for key, df in data_content.items():
+                    if hasattr(df, 'to_string'):
+                        data_summary.append(f"{key}: {len(df)} rows")
+                        data_details.append(f"\n{key.upper()} DATASET:\n{df.to_string(max_rows=20, max_cols=10)}")
+                
+                result_context = f"""This is a dual-output result containing both a visualization and multiple underlying datasets.
+
+PLOT: A {type(fig).__name__} showing the visualization requested by the user.
+
+UNDERLYING DATASETS SUMMARY:
+{chr(10).join(data_summary)}
+
+DETAILED DATASET CONTENTS:
+{chr(10).join(data_details)}
+
+You have access to both the visual representation AND the specific numerical values from multiple datasets. Use both in your analysis."""
+                logger.info(f"🎯 Dual-output result detected: plot + multiple datasets")
+            else:
+                result_type = "unknown tuple"
+                result_context = f"Tuple result with types: {type(result[0])}, {type(result[1])}"
+                logger.warning("🎯 Unexpected tuple format detected")
         else:
             result_type = "unknown tuple"
             result_context = f"Tuple result with types: {type(result[0])}, {type(result[1])}"
@@ -116,11 +218,15 @@ def ReasoningAgent(query: str, result: Any):
     Note: This function has UI dependencies (streamlit) that should be refactored for better separation of concerns.
     """
     logger.info(f"🧠 ReasoningAgent: Starting reasoning for query: '{query}'")
+    logger.info(f"🧠 Result type: {type(result)}")
+    logger.info(f"🧠 Result content preview: {str(result)[:200]}...")
     
     # Get system prompt context
     system_prompt_agent = SystemPromptMemoryAgent()
     
     prompt = ReasoningCurator(query, result)
+    logger.info(f"🧠 Generated prompt length: {len(prompt)} characters")
+    
     is_error = isinstance(result, str) and result.startswith("Error executing code")
     is_plot = isinstance(result, (plt.Figure, plt.Axes))
 
@@ -161,7 +267,15 @@ When analyzing tuple results (fig, data_df), you have access to both the visual 
 3. Explain both the visual patterns AND the numerical findings
 4. Compare the visual impression with the actual data values
 
-For example: "The bar chart shows Product A leading in sales, and the underlying data confirms this with Product A generating $125,000 compared to Product B's $89,000 and Product C's $67,000."
+# SPECIAL INSTRUCTIONS FOR MULTI-GRAPH RESULTS:
+When analyzing multi-graph results, you have access to multiple visualizations and their underlying data. Your analysis should:
+1. Analyze each chart individually with specific data values
+2. Identify relationships between the different charts
+3. Reference actual numbers from each chart's data
+4. Explain how the multiple visualizations work together
+5. Provide insights based on the combined analysis
+
+For example: "The bar chart shows Product A leading in sales ($125,000), the scatter plot reveals a strong correlation between age and salary, and the histogram shows the age distribution with most employees between 25-35 years old."
 
 -- Include specific recommendations based on the actual data found
 
@@ -169,6 +283,8 @@ Begin by streaming your detailed analytical process within `<think>...</think>` 
     
     # Apply system prompt if active
     system_prompt = system_prompt_agent.apply_system_prompt(base_system_prompt)
+    logger.info(f"📤 System prompt length: {len(system_prompt)} characters")
+    logger.info(f"📤 User prompt length: {len(prompt)} characters")
     
     # Streaming LLM call
     messages = [
@@ -178,7 +294,6 @@ Begin by streaming your detailed analytical process within `<think>...</think>` 
     
     response = make_llm_call(
         messages=messages,
-        model="nvidia/llama-3.1-nemotron-ultra-253b-v1",
         temperature=0.3,
         max_tokens=5000,
         stream=True
@@ -193,26 +308,50 @@ Begin by streaming your detailed analytical process within `<think>...</think>` 
 
     logger.info("📥 Starting to receive streaming response...")
     for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            token = chunk.choices[0].delta.content
-            token_count += 1
-            full_response += token
+        # Robust handling for streaming chunks that may be malformed or empty
+        try:
+            # Skip empty chunks
+            if not chunk:
+                continue
 
-            # Simple state machine to extract <think>...</think> as it streams
-            if "<think>" in token:
-                in_think = True
-                token = token.split("<think>", 1)[1]
-                logger.debug("🤔 Started thinking section")
-            if "</think>" in token:
-                token = token.split("</think>", 1)[0]
-                in_think = False
-                logger.debug("🤔 Ended thinking section")
-            if in_think or ("<think>" in full_response and not "</think>" in full_response):
-                thinking_content += token
-                thinking_placeholder.markdown(
-                    f'<details class="thinking" open><summary>🤔 Model Thinking</summary><pre>{thinking_content}</pre></details>',
-                    unsafe_allow_html=True
-                )
+            # Ensure the chunk has choices and at least one choice
+            choices = getattr(chunk, "choices", None)
+            if not choices or len(choices) == 0:
+                continue
+
+            # Take the first choice (OpenAI returns one choice for streaming)
+            choice = choices[0]
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+
+            token = getattr(delta, "content", None)
+            if token is None:
+                continue
+        except Exception as e:
+            # Log and skip any malformed chunk to prevent entire reasoning from crashing
+            logger.warning(f"⚠️ Skipping malformed stream chunk: {e}")
+            continue
+
+        # If we reach here, we have a valid token to process
+        token_count += 1
+        full_response += token
+
+        # Simple state machine to extract <think>...</think> as it streams
+        if "<think>" in token:
+            in_think = True
+            token = token.split("<think>", 1)[1]
+            logger.debug("🤔 Started thinking section")
+        if "</think>" in token:
+            token = token.split("</think>", 1)[0]
+            in_think = False
+            logger.debug("🤔 Ended thinking section")
+        if in_think or ("<think>" in full_response and not "</think>" in full_response):
+            thinking_content += token
+            thinking_placeholder.markdown(
+                f'<details class="thinking" open><summary>🤔 Model Thinking</summary><pre>{thinking_content}</pre></details>',
+                unsafe_allow_html=True
+            )
 
     logger.info(f"📥 Streaming complete: {token_count} tokens received")
     logger.info(f"🧠 Thinking content length: {len(thinking_content)} characters")
