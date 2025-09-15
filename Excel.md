@@ -4,6 +4,8 @@
 
 The Excel analysis system provides comprehensive multi-sheet Excel file processing capabilities with intelligent sheet selection, advanced data handling, professional reasoning output, and enhanced resilience features. This document details the complete workflow from file ingestion to final output generation, including all recent Phase 3: Resilience & Polish enhancements.
 
+> **📖 For end-user documentation on Excel analysis features, see [User_Guide.md](User_Guide.md)**
+
 ## Recent Updates & Enhancements
 
 ### Phase 3: Resilience & Polish Features

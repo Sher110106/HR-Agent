@@ -31,6 +31,7 @@ streamlit run streamlit_app.py
 
 ## 📖 Documentation
 
+- **User Guide** – comprehensive guide for practical app usage: [User_Guide.md](User_Guide.md)
 - **Technical Manual** – deep dive into architecture, setup & APIs: [Technical.md](Technical.md)
 - **User Manual** – step-by-step guide for end users: [User_Manual.md](User_Manual.md)
 

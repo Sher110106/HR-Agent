@@ -2,6 +2,8 @@
 
 The Streamlit-based HR Data-Analysis Agent is architected to always deliver **dual-modal answers** – a professional-quality chart **and** a concise narrative explanation – whenever a user's natural-language question implies that a visualisation is helpful. The system now supports **multiple analysis modes** through a sophisticated multi-page interface.
 
+> **📖 For comprehensive user documentation and practical usage examples, see [User_Guide.md](User_Guide.md)**
+
 ## 🎯 Multi-Page Analysis Interface
 
 The application now provides **five specialized analysis pages**:

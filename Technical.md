@@ -31,6 +31,8 @@
 ## Introduction
 The **Business Analysis HR Agent** is an AI-powered data-analysis platform that converts HR datasets into actionable insights using natural language queries. This manual documents the internal architecture, codebase layout, and operational procedures required to develop, maintain, and deploy the system.
 
+> **📖 For end-user documentation and practical usage guides, see [User_Guide.md](User_Guide.md)**
+
 ## Target Audience
 * Full-stack engineers integrating new features.
 * DevOps / SRE teams responsible for deployment & uptime.

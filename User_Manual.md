@@ -1,6 +1,8 @@
 # User Manual – Business Analysis HR Agent
 
 > **Welcome!** This guide will help you go from zero to actionable HR insights in minutes.
+> 
+> **📖 For a comprehensive user guide with detailed features and examples, see [User_Guide.md](User_Guide.md)**
 
 ---
 

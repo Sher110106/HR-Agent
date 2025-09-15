@@ -2,6 +2,8 @@
 
 ## 🎯 **Comprehensive Improvement Strategy**
 
+> **📖 For end-user documentation on plotting features and options, see [User_Guide.md](User_Guide.md)**
+
 ### **Current State Analysis**
 
 The HR-Agent already has a solid foundation with:
