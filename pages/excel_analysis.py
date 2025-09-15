@@ -549,13 +549,17 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                         col4 = None
                     
                     with col1 if not has_data else col2:
-                        # Download detailed reasoning (not condensed content)
-                        reasoning_text = msg.get("detailed_reasoning", "")
+                        # Download text response (prefer detailed reasoning if available)
+                        # Extract clean text from the response (remove HTML)
+                        import re
+                        source_text = msg.get("detailed_reasoning", msg["content"]) or ""
+                        clean_text = re.sub(r'<[^>]+>', '', source_text)
+                        clean_text = re.sub(r'\n+', '\n', clean_text).strip()
                         
-                        if reasoning_text:
-                            # Convert reasoning to DOCX
+                        if clean_text:
+                            # Convert to DOCX
                             from utils.docx_utils import text_to_docx
-                            docx_data = text_to_docx(reasoning_text, title=f"Excel Analysis Response {i+1}")
+                            docx_data = text_to_docx(clean_text, title=f"Excel Analysis Response {i+1}")
                             st.download_button(
                                 label="📝 DOCX",
                                 data=docx_data,
@@ -633,7 +637,7 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                             # Plotly figure - clean for safe Streamlit display with proper theming
                             from utils.plot_helpers import safe_plotly_figure_for_streamlit
                             safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
-                            st.plotly_chart(safe_fig, use_container_width=True)
+                            st.plotly_chart(safe_fig, use_container_width=True, key=f"excel_plotly_chart_single_{i}_{idx}")
                         else:
                             # Matplotlib figure (legacy)
                             st.pyplot(fig, use_container_width=False)
@@ -656,7 +660,7 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                                     # Plotly figure - clean for safe Streamlit display with proper theming
                                     from utils.plot_helpers import safe_plotly_figure_for_streamlit
                                     safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
-                                    st.plotly_chart(safe_fig, use_container_width=True)
+                                    st.plotly_chart(safe_fig, use_container_width=True, key=f"excel_plotly_chart_multi_{i}_{idx}")
                                 else:
                                     # Matplotlib figure (legacy)
                                     st.pyplot(fig, use_container_width=False)
@@ -870,7 +874,7 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                                 f'<pre>{raw_thinking}</pre>'
                                 '</details>'
                             )
-                        
+
                         # Add sheet plan info
                         plan_info = f"\n\n**📋 Analysis Plan:**\n"
                         plan_info += f"- **Strategy:** {sheet_plan.join_strategy}\n"
@@ -878,16 +882,14 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                         if sheet_plan.join_keys:
                             plan_info += f"- **Join keys:** {', '.join(sheet_plan.join_keys)}\n"
                         
-                        # Create condensed content for user display (just the thinking + plan info)
-                        condensed_content = f"{thinking_html}{plan_info}"
-                        
-                        # Store detailed reasoning separately for DOCX download
-                        detailed_reasoning = reasoning_txt
-                        
+                        # Build content like test.py (collapsible thinking + explanation)
+                        detailed_reasoning = f"{reasoning_txt}{plan_info}"
+                        visible_content = f"{thinking_html}{detailed_reasoning}"
+
                         st.session_state.excel_messages.append({
                             "role": "assistant",
-                            "content": condensed_content,  # Only condensed content for display
-                            "detailed_reasoning": detailed_reasoning,  # Full reasoning for DOCX download
+                            "content": visible_content,
+                            "detailed_reasoning": detailed_reasoning,
                             "plot_index": plot_idx,
                             "data_index": data_idx,
                             "code": code

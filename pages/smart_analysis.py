@@ -353,20 +353,24 @@ def analyze_with_pandasai(df, question):
                 raw_thinking, reasoning_txt = ReasoningAgent(question, result_obj)
                 reasoning_txt = reasoning_txt.replace("`", "")
                 
-                # Create condensed content for user display (just PandasAI response)
-                condensed_content = f"""
-**🤖 PandasAI Analysis:**
-{combined_response}
-"""
-                
-                # Store detailed reasoning separately for DOCX download
+                # Build content like test.py with collapsible reasoning
+                thinking_html = ""
+                if raw_thinking:
+                    thinking_html = (
+                        '<details class="thinking">'
+                        '<summary>🧠 Reasoning</summary>'
+                        f'<pre>{raw_thinking}</pre>'
+                        '</details>'
+                    )
+
                 detailed_reasoning = reasoning_txt
-                
+                visible_content = f"{thinking_html}{reasoning_txt}"
+
                 # Create assistant message with proper structure
                 assistant_message = {
                     "role": "assistant",
-                    "content": condensed_content,  # Only condensed content for display
-                    "detailed_reasoning": detailed_reasoning,  # Full reasoning for DOCX download
+                    "content": visible_content,
+                    "detailed_reasoning": detailed_reasoning,
                     "plot_index": plot_idx,
                     "data_index": data_idx,
                     "code": code_content
@@ -818,13 +822,17 @@ def render_chat_interface():
                         col4 = None
                     
                     with col1 if not has_data else col2:
-                        # Download detailed reasoning (not condensed content)
-                        reasoning_text = msg.get("detailed_reasoning", "")
+                        # Download text response (prefer detailed reasoning if available)
+                        # Extract clean text from the response (remove HTML)
+                        import re
+                        source_text = msg.get("detailed_reasoning", msg["content"]) or ""
+                        clean_text = re.sub(r'<[^>]+>', '', source_text)
+                        clean_text = re.sub(r'\n+', '\n', clean_text).strip()
                         
-                        if reasoning_text:
-                            # Convert reasoning to DOCX
+                        if clean_text:
+                            # Convert to DOCX
                             from utils.docx_utils import text_to_docx
-                            docx_data = text_to_docx(reasoning_text, title=f"Smart Analysis Response {i+1}")
+                            docx_data = text_to_docx(clean_text, title=f"Smart Analysis Response {i+1}")
                             st.download_button(
                                 label="📝 DOCX",
                                 data=docx_data,
@@ -902,7 +910,7 @@ def render_chat_interface():
                             # Plotly figure - clean for safe Streamlit display with proper theming
                             from utils.plot_helpers import safe_plotly_figure_for_streamlit
                             safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
-                            st.plotly_chart(safe_fig, use_container_width=True)
+                            st.plotly_chart(safe_fig, use_container_width=True, key=f"smart_plotly_chart_single_{i}_{idx}")
                         else:
                             # Matplotlib figure (legacy)
                             st.pyplot(fig, use_container_width=False)
@@ -925,7 +933,7 @@ def render_chat_interface():
                                     # Plotly figure - clean for safe Streamlit display with proper theming
                                     from utils.plot_helpers import safe_plotly_figure_for_streamlit
                                     safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
-                                    st.plotly_chart(safe_fig, use_container_width=True)
+                                    st.plotly_chart(safe_fig, use_container_width=True, key=f"smart_plotly_chart_multi_{i}_{idx}")
                                 else:
                                     # Matplotlib figure (legacy)
                                     st.pyplot(fig, use_container_width=False)

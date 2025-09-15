@@ -28,6 +28,8 @@ from .docx_utils import (
     analysis_to_docx
 )
 
+from .summarizer import build_condensed_summary
+
 __all__ = [
     'format_axis_labels',
     'apply_professional_styling', 
@@ -49,4 +51,6 @@ __all__ = [
     'text_to_docx',
     'dataframe_to_docx_table',
     'analysis_to_docx'
+    ,
+    'build_condensed_summary'
 ]

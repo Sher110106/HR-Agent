@@ -374,11 +374,10 @@ def data_analysis_page():
                             col4 = None
                         
                         with col1 if not has_data else col2:
-                            # Download text response based on on-screen content
+                            # Download text response
                             # Extract clean text from the response (remove HTML)
                             import re
-                            source_text = msg["content"] or ""
-                            clean_text = re.sub(r'<[^>]+>', '', source_text)
+                            clean_text = re.sub(r'<[^>]+>', '', msg["content"])
                             clean_text = re.sub(r'\n+', '\n', clean_text).strip()
                             
                             if clean_text:
@@ -463,7 +462,7 @@ def data_analysis_page():
                                 # Plotly figure - clean for safe Streamlit display with proper theming
                                 from utils.plot_helpers import safe_plotly_figure_for_streamlit
                                 safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
-                                st.plotly_chart(safe_fig, use_container_width=True, key=f"plotly_chart_single_{i}_{idx}")
+                                st.plotly_chart(safe_fig, use_container_width=True)
                             else:
                                 # Matplotlib figure (legacy)
                                 st.pyplot(fig, use_container_width=False)
@@ -485,7 +484,7 @@ def data_analysis_page():
                                     # Plotly figure - clean for safe Streamlit display with proper theming
                                     from utils.plot_helpers import safe_plotly_figure_for_streamlit
                                     safe_fig = safe_plotly_figure_for_streamlit(fig, theme='auto', variant='professional')
-                                    st.plotly_chart(safe_fig, use_container_width=True, key=f"plotly_chart_multi_{i}_{idx}")
+                                    st.plotly_chart(safe_fig, use_container_width=True)
                                 else:
                                     # Matplotlib figure (legacy)
                                     st.pyplot(fig, use_container_width=False)
@@ -693,7 +692,7 @@ def data_analysis_page():
                     header = f"Result: {result_obj}"
                     logger.info(f"📄 Scalar result: {header}")
 
-                # Build content with collapsible reasoning like test.py
+                # Show only reasoning thinking in Model Thinking (collapsed by default)
                 thinking_html = ""
                 if raw_thinking:
                     thinking_html = (
@@ -703,18 +702,18 @@ def data_analysis_page():
                         '</details>'
                     )
 
+                # Show model explanation directly 
                 explanation_html = reasoning_txt
 
-                # Visible content mirrors test.py (thinking block + explanation)
-                detailed_reasoning = explanation_html  # keep full explanation for downloads
-                visible_content = f"{thinking_html}{explanation_html}"
+                # Store code separately for proper display
+                # Combine thinking and explanation
+                assistant_msg = f"{thinking_html}{explanation_html}"
 
                 # Store message with appropriate plot indices
                 message_data = {
                     "role": "assistant",
-                    "content": visible_content,
-                    "detailed_reasoning": detailed_reasoning,
-                    "code": code
+                    "content": assistant_msg,
+                    "code": code  # Store code separately
                 }
                 
                 if is_multi_graph:

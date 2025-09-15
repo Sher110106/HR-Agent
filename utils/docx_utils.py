@@ -1,303 +1,248 @@
-"""
-DOCX utility functions for converting text to Microsoft Word documents with
-improved formatting and readability.
+"""Utilities for generating DOCX documents.
+
+Exposes helpers that return bytes ready for download buttons:
+- text_to_docx(text, title)
+- dataframe_to_docx_table(df, title)
+- analysis_to_docx(analysis_text, dataframe, title)
 """
 
-import io
+from __future__ import annotations
+
+from io import BytesIO
+from typing import Optional
+
 from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml.shared import OxmlElement, qn
-from typing import Optional, List, Dict, Any
+from docx.shared import Inches, Pt
 
 
-def _apply_document_defaults(doc: Document, title: Optional[str] = None, author: Optional[str] = None) -> None:
-    """Apply sensible defaults: margins, base font, and core properties."""
-    # Margins
-    for section in doc.sections:
-        section.top_margin = Inches(0.75)
-        section.bottom_margin = Inches(0.75)
-        section.left_margin = Inches(0.75)
-        section.right_margin = Inches(0.75)
-
-    # Base font: Calibri 11 (fallback to default if unavailable)
-    try:
-        style = doc.styles['Normal']
-        font = style.font
-        font.name = 'Calibri'
-        font.size = Pt(11)
-    except Exception:
-        # If Normal style is not accessible, ignore silently
-        pass
-
-    # Core properties
-    if title:
-        doc.core_properties.title = title
-    if author:
-        doc.core_properties.author = author
+def _apply_default_page_margins(document: Document) -> None:
+    section = document.sections[0]
+    section.top_margin = Inches(0.75)
+    section.bottom_margin = Inches(0.75)
+    section.left_margin = Inches(0.75)
+    section.right_margin = Inches(0.75)
 
 
-def _add_inline_formatted_runs(paragraph, text: str) -> None:
-    """Add runs supporting simple markdown-like inline formatting: **bold**, *italic*, `code`.
+def _set_default_font(document: Document, size_pt: int = 11) -> None:
+    style = document.styles["Normal"]
+    font = style.font
+    font.name = "Calibri"
+    font.size = Pt(size_pt)
 
-    This is not a full markdown parser; it handles non-nested, common cases cleanly.
+
+def _add_title(document: Document, title: Optional[str]) -> None:
+    if not title:
+        return
+    document.add_heading(title, level=1)
+
+
+def _add_inline_markdown_runs(paragraph, text: str) -> None:
+    """Render a subset of Markdown inline formatting into runs.
+
+    Supports bold **text** or __text__ and italics *text* or _text_.
     """
-    import re
+    i = 0
+    n = len(text)
+    bold = False
+    italic = False
+    buffer = []
 
-    # Tokenize by code spans first to avoid styling conflicts
-    parts = re.split(r"(`[^`]+`)", text)
-    for part in parts:
-        if not part:
+    def flush_buffer(make_bold: bool, make_italic: bool) -> None:
+        if not buffer:
+            return
+        run = paragraph.add_run("".join(buffer))
+        run.bold = make_bold
+        run.italic = make_italic
+        buffer.clear()
+
+    while i < n:
+        # Handle bold markers ** or __
+        if i + 1 < n and text[i : i + 2] in ("**", "__"):
+            flush_buffer(bold, italic)
+            bold = not bold
+            i += 2
             continue
-        if part.startswith('`') and part.endswith('`') and len(part) >= 2:
-            code_text = part[1:-1]
-            run = paragraph.add_run(code_text)
-            run.font.name = 'Courier New'
-            run.font.size = Pt(10)
-            # Subtle visual distinction
-            run.italic = False
-            run.bold = False
+        # Handle italics markers * or _
+        if text[i] in ("*", "_"):
+            flush_buffer(bold, italic)
+            italic = not italic
+            i += 1
+            continue
+        buffer.append(text[i])
+        i += 1
+
+    flush_buffer(bold, italic)
+
+
+def _add_markdown_content(document: Document, text: str) -> None:
+    """Render simple Markdown into the document.
+
+    Supported:
+    - Headings: #, ##, ### (and a whole-line **Heading** treated as level-2)
+    - Bullet lists: lines starting with '-' or '*'
+    - Inline: bold (** or __) and italics (* or _)
+    - Paragraphs separated by blank lines
+    """
+    lines = text.split("\n")
+    paragraph_buffer: list[str] = []
+
+    def flush_paragraph_buffer() -> None:
+        if not paragraph_buffer:
+            return
+        para = document.add_paragraph()
+        para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+        _add_inline_markdown_runs(para, "\n".join(paragraph_buffer))
+        paragraph_buffer.clear()
+
+    for raw in lines:
+        line = raw.rstrip()
+        if line.strip() == "":
+            flush_paragraph_buffer()
+            document.add_paragraph("")
             continue
 
-        # Now handle bold and italic within non-code text
-        idx = 0
-        pattern = re.compile(r"(\*\*[^*]+\*\*|\*[^*]+\*)")
-        for m in pattern.finditer(part):
-            if m.start() > idx:
-                paragraph.add_run(part[idx:m.start()])
-            token = m.group(0)
-            if token.startswith('**') and token.endswith('**'):
-                run = paragraph.add_run(token[2:-2])
+        # Headings with #
+        if line.startswith("#"):
+            level = min(len(line) - len(line.lstrip('#')), 3)
+            heading_text = line[level:].strip()
+            if heading_text:
+                document.add_heading(heading_text, level=level)
+                continue
+
+        # Heading if the whole line is bold like **Heading**
+        if line.startswith("**") and line.endswith("**") and len(line) > 4 and line.count("**") == 2:
+            heading_text = line[2:-2].strip()
+            if heading_text:
+                document.add_heading(heading_text, level=2)
+                continue
+
+        # Bullet list items
+        if line.lstrip().startswith(("- ", "* ")):
+            flush_paragraph_buffer()
+            content = line.lstrip()[2:].strip()
+            para = document.add_paragraph(style="List Bullet")
+            para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            _add_inline_markdown_runs(para, content)
+            continue
+
+        # Normal paragraph content; accumulate until blank line
+        paragraph_buffer.append(line)
+
+    flush_paragraph_buffer()
+
+
+def _bold_header_row(table) -> None:
+    hdr_cells = table.rows[0].cells
+    for cell in hdr_cells:
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
                 run.bold = True
-            elif token.startswith('*') and token.endswith('*'):
-                run = paragraph.add_run(token[1:-1])
-                run.italic = True
-            idx = m.end()
-        if idx < len(part):
-            paragraph.add_run(part[idx:])
 
 
-def _add_markdown_like_text(doc: Document, text: str) -> None:
-    """Convert simple markdown-like text to a formatted DOCX document structure.
-
-    Supports:
-    - #, ##, ### headings
-    - Bullet lists (-, *, •) and numbered lists (1., 1)
-    - Inline styles: **bold**, *italic*, `code`
-    - Code blocks delimited by ``` fences
-    - Paragraph justification for longer text
-    """
-    import re
-
-    lines = text.splitlines()
-    in_code_block = False
-
-    for raw_line in lines:
-        line = raw_line.rstrip('\n')
-
-        # Code block fence
-        if line.strip().startswith('```'):
-            in_code_block = not in_code_block
-            if in_code_block:
-                # Start an explicit code paragraph for separation
-                p = doc.add_paragraph()
-                run = p.add_run()
-                run.add_break()
-            else:
-                # End of code block separation
-                p = doc.add_paragraph()
-            continue
-
-        if in_code_block:
-            # Monospace runs for each code line
-            p = doc.add_paragraph()
-            run = p.add_run(line if line else " ")
-            run.font.name = 'Courier New'
-            run.font.size = Pt(10)
-            continue
-
-        if not line.strip():
-            doc.add_paragraph("")
-            continue
-
-        # Headings
-        m_h = re.match(r"^(#{1,6})\s+(.*)$", line)
-        if m_h:
-            hashes, h_text = m_h.groups()
-            level = min(len(hashes), 3)  # use up to Heading 3 for consistency
-            doc.add_heading(h_text.strip(), level=level)
-            continue
-
-        # Numbered list
-        if re.match(r"^\s*\d+[\.)]\s+", line):
-            text_only = re.sub(r"^\s*\d+[\.)]\s+", "", line)
-            p = doc.add_paragraph(style='List Number')
-            _add_inline_formatted_runs(p, text_only)
-            continue
-
-        # Bulleted list
-        if re.match(r"^\s*[-*•]\s+", line):
-            text_only = re.sub(r"^\s*[-*•]\s+", "", line)
-            p = doc.add_paragraph(style='List Bullet')
-            _add_inline_formatted_runs(p, text_only)
-            continue
-
-        # Normal paragraph with inline formatting
-        p = doc.add_paragraph()
-        _add_inline_formatted_runs(p, line)
-        if len(line) > 200:
-            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-
-def text_to_docx(text: str, title: Optional[str] = None, author: Optional[str] = None) -> bytes:
-    """
-    Convert text content to a DOCX document.
-    
-    Args:
-        text: The text content to convert
-        title: Optional document title
-        author: Optional document author
-        
-    Returns:
-        DOCX document as bytes
-    """
-    # Create a new document and apply defaults
-    doc = Document()
-    _apply_document_defaults(doc, title=title, author=author)
-
-    # Title and author heading
-    if title:
-        title_paragraph = doc.add_heading(title, level=0)
-        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if author:
-        author_paragraph = doc.add_paragraph(f"Author: {author}")
-        author_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        doc.add_paragraph("")
-
-    # Body content with markdown-like formatting
-    _add_markdown_like_text(doc, text)
-    
-    # Save to bytes buffer
-    docx_buffer = io.BytesIO()
-    doc.save(docx_buffer)
-    docx_buffer.seek(0)
-    
-    return docx_buffer.getvalue()
+def _enable_table_autofit(table) -> None:
+    # Ensure table autofit is enabled in the underlying XML so Word adjusts widths
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+    tblLayout = tblPr.tblLayout
+    if tblLayout is None:
+        tblLayout = OxmlElement("w:tblLayout")
+        tblPr.append(tblLayout)
+    tblLayout.set(qn("w:type"), "autofit")
 
 
-def dataframe_to_docx_table(df, title: Optional[str] = None) -> bytes:
-    """
-    Convert a pandas DataFrame to a DOCX document with a formatted table.
-    
-    Args:
-        df: Pandas DataFrame to convert
-        title: Optional document title
-        
-    Returns:
-        DOCX document as bytes
+def _document_to_bytes(document: Document) -> bytes:
+    buffer = BytesIO()
+    document.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def text_to_docx(text: str, title: Optional[str] = None) -> bytes:
+    """Create a DOCX containing the provided text, returned as bytes.
+
+    - Title is optional and rendered as Heading 1 when provided.
+    - Text preserves paragraphs (double newline) and line breaks (single newline).
     """
     doc = Document()
-    _apply_document_defaults(doc, title=title)
+    _apply_default_page_margins(doc)
+    _set_default_font(doc, size_pt=11)
+    _add_title(doc, title)
+    if text:
+        _add_markdown_content(doc, text)
+    return _document_to_bytes(doc)
 
-    # Add title if provided
-    if title:
-        doc.add_heading(title, level=0)
-        doc.add_paragraph("")
 
-    # Create table with a clean style
+def dataframe_to_docx_table(df, title: Optional[str] = None) -> bytes:  # type: ignore[no-untyped-def]
+    """Create a DOCX with an optional title and a table for the DataFrame.
+
+    Returns bytes suitable for Streamlit's download_button.
+    """
+    doc = Document()
+    _apply_default_page_margins(doc)
+    _set_default_font(doc, size_pt=11)
+    _add_title(doc, title)
+
+    if df is None or df.empty:
+        doc.add_paragraph("No data available.")
+        return _document_to_bytes(doc)
+
     table = doc.add_table(rows=1, cols=len(df.columns))
-    # Prefer a built-in light style if available; fall back to Table Grid
-    try:
-        table.style = 'Light List Accent 1'
-    except Exception:
-        table.style = 'Table Grid'
+    table.style = "Light List"
+    _enable_table_autofit(table)
 
-    table.autofit = True
-
-    # Header styling
+    # Header row
     hdr_cells = table.rows[0].cells
     for i, col_name in enumerate(df.columns):
-        p = hdr_cells[i].paragraphs[0]
-        run = p.add_run(str(col_name))
-        run.bold = True
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Add data rows (limit very large frames for performance)
-    max_rows = 1000
-    for _, row in df.head(max_rows).iterrows():
+        hdr_cells[i].text = str(col_name)
+    _bold_header_row(table)
+
+    # Data rows
+    for _, row in df.iterrows():
         row_cells = table.add_row().cells
         for i, value in enumerate(row):
-            row_cells[i].text = str(value)
+            row_cells[i].text = "" if value is None else str(value)
 
-    if len(df) > max_rows:
-        doc.add_paragraph(f"Note: Showing first {max_rows} rows of {len(df)} total rows.")
-    
-    # Save to bytes buffer
-    docx_buffer = io.BytesIO()
-    doc.save(docx_buffer)
-    docx_buffer.seek(0)
-    
-    return docx_buffer.getvalue()
+    return _document_to_bytes(doc)
 
 
-def analysis_to_docx(text: str, data_df=None, title: Optional[str] = None) -> bytes:
-    """
-    Create a comprehensive DOCX document with analysis text and optional data table.
-    
-    Args:
-        text: Analysis text content
-        data_df: Optional pandas DataFrame to include as table
-        title: Optional document title
-        
-    Returns:
-        DOCX document as bytes
+def analysis_to_docx(
+    analysis_text: Optional[str] = None,
+    dataframe=None,  # type: ignore[no-untyped-def]
+    title: Optional[str] = "Analysis Report",
+) -> bytes:
+    """Create a comprehensive report with analysis text and optional data table.
+
+    - If analysis_text is provided, it is added as formatted paragraphs.
+    - If dataframe is provided and non-empty, it is appended as a table.
+    Returns bytes for direct download.
     """
     doc = Document()
-    _apply_document_defaults(doc, title=title)
+    _apply_default_page_margins(doc)
+    _set_default_font(doc, size_pt=11)
+    _add_title(doc, title)
 
-    # Add title
-    if title:
-        doc.add_heading(title, level=0)
-    else:
-        doc.add_heading("Data Analysis Report", level=0)
+    if analysis_text:
+        _add_markdown_content(doc, analysis_text)
 
-    # Analysis section
-    doc.add_heading("Analysis", level=1)
-    _add_markdown_like_text(doc, text)
-
-    # Add data table if provided
-    if data_df is not None and hasattr(data_df, 'empty') and not data_df.empty:
+    if dataframe is not None and getattr(dataframe, "empty", False) is False:
         doc.add_paragraph("")
-        doc.add_heading("Data Summary", level=1)
+        doc.add_heading("Data Table", level=2)
+        table = doc.add_table(rows=1, cols=len(dataframe.columns))
+        table.style = "Light List"
+        _enable_table_autofit(table)
 
-        # Create table with styling
-        table = doc.add_table(rows=1, cols=len(data_df.columns))
-        try:
-            table.style = 'Light List Accent 1'
-        except Exception:
-            table.style = 'Table Grid'
-        table.autofit = True
-
-        # Header
         hdr_cells = table.rows[0].cells
-        for i, col_name in enumerate(data_df.columns):
-            p = hdr_cells[i].paragraphs[0]
-            run = p.add_run(str(col_name))
-            run.bold = True
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for i, col_name in enumerate(dataframe.columns):
+            hdr_cells[i].text = str(col_name)
+        _bold_header_row(table)
 
-        # Rows (limit to 200 for a concise report)
-        max_rows = 200
-        for _, row in data_df.head(max_rows).iterrows():
+        for _, row in dataframe.iterrows():
             row_cells = table.add_row().cells
             for i, value in enumerate(row):
-                row_cells[i].text = str(value)
+                row_cells[i].text = "" if value is None else str(value)
 
-        if len(data_df) > max_rows:
-            doc.add_paragraph(f"Note: Showing first {max_rows} rows of {len(data_df)} total rows.")
+    return _document_to_bytes(doc)
 
-    # Save to bytes buffer
-    docx_buffer = io.BytesIO()
-    doc.save(docx_buffer)
-    docx_buffer.seek(0)
 
-    return docx_buffer.getvalue()
