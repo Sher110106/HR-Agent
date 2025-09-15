@@ -353,19 +353,20 @@ def analyze_with_pandasai(df, question):
                 raw_thinking, reasoning_txt = ReasoningAgent(question, result_obj)
                 reasoning_txt = reasoning_txt.replace("`", "")
                 
-                # Create enhanced content combining PandasAI response and reasoning
-                enhanced_content = f"""
+                # Create condensed content for user display (just PandasAI response)
+                condensed_content = f"""
 **🤖 PandasAI Analysis:**
 {combined_response}
-
-**🧠 AI Reasoning:**
-{reasoning_txt}
 """
+                
+                # Store detailed reasoning separately for DOCX download
+                detailed_reasoning = reasoning_txt
                 
                 # Create assistant message with proper structure
                 assistant_message = {
                     "role": "assistant",
-                    "content": enhanced_content,
+                    "content": condensed_content,  # Only condensed content for display
+                    "detailed_reasoning": detailed_reasoning,  # Full reasoning for DOCX download
                     "plot_index": plot_idx,
                     "data_index": data_idx,
                     "code": code_content
@@ -817,16 +818,13 @@ def render_chat_interface():
                         col4 = None
                     
                     with col1 if not has_data else col2:
-                        # Download text response
-                        # Extract clean text from the response (remove HTML)
-                        import re
-                        clean_text = re.sub(r'<[^>]+>', '', msg["content"])
-                        clean_text = re.sub(r'\n+', '\n', clean_text).strip()
+                        # Download detailed reasoning (not condensed content)
+                        reasoning_text = msg.get("detailed_reasoning", "")
                         
-                        if clean_text:
-                            # Convert to DOCX
+                        if reasoning_text:
+                            # Convert reasoning to DOCX
                             from utils.docx_utils import text_to_docx
-                            docx_data = text_to_docx(clean_text, title=f"Smart Analysis Response {i+1}")
+                            docx_data = text_to_docx(reasoning_text, title=f"Smart Analysis Response {i+1}")
                             st.download_button(
                                 label="📝 DOCX",
                                 data=docx_data,

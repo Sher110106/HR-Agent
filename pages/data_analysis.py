@@ -374,16 +374,13 @@ def data_analysis_page():
                             col4 = None
                         
                         with col1 if not has_data else col2:
-                            # Download text response
-                            # Extract clean text from the response (remove HTML)
-                            import re
-                            clean_text = re.sub(r'<[^>]+>', '', msg["content"])
-                            clean_text = re.sub(r'\n+', '\n', clean_text).strip()
+                            # Download detailed reasoning (not condensed content)
+                            reasoning_text = msg.get("detailed_reasoning", "")
                             
-                            if clean_text:
-                                # Convert to DOCX
+                            if reasoning_text:
+                                # Convert reasoning to DOCX
                                 from utils.docx_utils import text_to_docx
-                                docx_data = text_to_docx(clean_text, title=f"Analysis Response {i+1}")
+                                docx_data = text_to_docx(reasoning_text, title=f"Analysis Response {i+1}")
                                 st.download_button(
                                     label="📝 DOCX",
                                     data=docx_data,
@@ -702,17 +699,17 @@ def data_analysis_page():
                         '</details>'
                     )
 
-                # Show model explanation directly 
-                explanation_html = reasoning_txt
-
-                # Store code separately for proper display
-                # Combine thinking and explanation
-                assistant_msg = f"{thinking_html}{explanation_html}"
+                # Create condensed content for user display (just the thinking, collapsed)
+                condensed_content = thinking_html
+                
+                # Store reasoning separately for DOCX download
+                detailed_reasoning = reasoning_txt
 
                 # Store message with appropriate plot indices
                 message_data = {
                     "role": "assistant",
-                    "content": assistant_msg,
+                    "content": condensed_content,  # Only condensed content for display
+                    "detailed_reasoning": detailed_reasoning,  # Full reasoning for DOCX download
                     "code": code  # Store code separately
                 }
                 

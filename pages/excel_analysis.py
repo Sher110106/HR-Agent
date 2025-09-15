@@ -549,16 +549,13 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                         col4 = None
                     
                     with col1 if not has_data else col2:
-                        # Download text response
-                        # Extract clean text from the response (remove HTML)
-                        import re
-                        clean_text = re.sub(r'<[^>]+>', '', msg["content"])
-                        clean_text = re.sub(r'\n+', '\n', clean_text).strip()
+                        # Download detailed reasoning (not condensed content)
+                        reasoning_text = msg.get("detailed_reasoning", "")
                         
-                        if clean_text:
-                            # Convert to DOCX
+                        if reasoning_text:
+                            # Convert reasoning to DOCX
                             from utils.docx_utils import text_to_docx
-                            docx_data = text_to_docx(clean_text, title=f"Excel Analysis Response {i+1}")
+                            docx_data = text_to_docx(reasoning_text, title=f"Excel Analysis Response {i+1}")
                             st.download_button(
                                 label="📝 DOCX",
                                 data=docx_data,
@@ -881,13 +878,16 @@ def render_chat_interface(sheet_catalog_agent: SheetCatalogAgent, column_indexer
                         if sheet_plan.join_keys:
                             plan_info += f"- **Join keys:** {', '.join(sheet_plan.join_keys)}\n"
                         
-                        # Combine thinking and explanation (like CSV analysis)
-                        explanation_html = reasoning_txt
-                        assistant_msg = f"{thinking_html}{explanation_html}{plan_info}"
+                        # Create condensed content for user display (just the thinking + plan info)
+                        condensed_content = f"{thinking_html}{plan_info}"
+                        
+                        # Store detailed reasoning separately for DOCX download
+                        detailed_reasoning = reasoning_txt
                         
                         st.session_state.excel_messages.append({
                             "role": "assistant",
-                            "content": assistant_msg,
+                            "content": condensed_content,  # Only condensed content for display
+                            "detailed_reasoning": detailed_reasoning,  # Full reasoning for DOCX download
                             "plot_index": plot_idx,
                             "data_index": data_idx,
                             "code": code
