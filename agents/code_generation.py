@@ -150,7 +150,16 @@ REQUIREMENTS
     – handle_seaborn_warnings()
     – safe_binning(data, bins, labels=None, method='cut')
     
-    Import from: from utils.plot_helpers import apply_professional_styling, get_professional_colors, etc."""
+    CRITICAL - CORRECT IMPORTS (DO NOT use other import paths):
+    from utils.plot_helpers import (
+        apply_professional_styling, get_professional_colors, create_category_palette,
+        safe_binning, optimize_figure_size, add_value_labels
+    )
+    
+    DO NOT import from:
+    - utils.data_preparation (does not exist)
+    - utils.style_manager (does not exist)
+    Use utils.plot_helpers instead."""
     else:
         engine_instructions = """
 REQUIREMENTS
@@ -177,7 +186,18 @@ REQUIREMENTS
     
     IMPORTANT: These helpers return Plotly figures. ALWAYS pass None as the first parameter (ax).
     Additionally, ALWAYS provide meaningful 'xlabel' and 'ylabel' arguments so axis titles are visible.
-    Import from: from utils.plot_migration_shims import create_clean_bar_chart, create_clean_line_chart, etc."""
+    
+    CRITICAL - CORRECT IMPORTS (DO NOT use other import paths):
+    from utils.plot_migration_shims import (
+        create_clean_bar_chart, create_clean_line_chart, create_clean_scatter_plot,
+        create_clean_histogram, create_clean_box_plot, create_clean_violin_plot, create_clean_pie_chart
+    )
+    from utils.plot_helpers import get_professional_colors, create_category_palette
+    
+    DO NOT import from:
+    - utils.data_preparation (does not exist)
+    - utils.style_manager (does not exist)
+    Use utils.plot_migration_shims and utils.plot_helpers instead."""
     
     prompt = f"""
 Given DataFrame `df` with columns and data types:
@@ -218,8 +238,9 @@ Write Python code using pandas, matplotlib (as plt) and seaborn (as sns) to answ
     - For category-specific colors: palette = create_category_palette(df['category_col'].unique())
     - For general seaborn plots: palette = get_professional_colors()['colors'][:n_categories]
     - Always slice colors to match the number of categories to avoid warnings
-    - When using seaborn with palette, assign the categorical column to 'hue' and set legend=False to avoid deprecation warnings
-    - Example: sns.barplot(data=df, x='x_col', y='y_col', hue='category_col', palette=palette, legend=False)
+    - When using seaborn with palette, assign the categorical column to 'hue'
+    - To control legend display, use ax.legend() or ax.get_legend().remove() after plotting, NOT legend=False parameter
+    - Example: sns.barplot(data=df, x='x_col', y='y_col', hue='category_col', palette=palette, ax=ax)
     
     PANDAS BEST PRACTICES:
     - Use observed=True in groupby operations: df.groupby('col', observed=True)
@@ -435,6 +456,15 @@ Output ONLY a properly-closed ```python code block. For date parsing use smart_d
             temperature=0.2,
             max_tokens=4000
         )
+    except ValueError as e:
+        # Handle Gemini API blocks (safety filters, etc.)
+        if "blocked" in str(e).lower() or "finish_reason" in str(e).lower():
+            logger.error(f"❌ Gemini API blocked the request: {e}")
+            error_msg = "The AI model blocked this request due to content safety filters. This may happen with sensitive employee data."
+            error_msg += "\n\nPlease try:\n1. Simplifying your query\n2. Using more general terms\n3. Switching to Azure OpenAI (GPT-4.1) model in the sidebar if available"
+            return f"Error generating code: {error_msg}", False, ""
+        logger.error(f"❌ Code generation LLM call failed: {e}")
+        return f"Error generating code: {e}", False, ""
     except Exception as e:
         logger.error(f"❌ Code generation LLM call failed: {e}")
         # Propagate a structured error so the UI can show meaningful message

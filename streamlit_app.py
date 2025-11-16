@@ -97,7 +97,7 @@ def main():
             return
 
         # Add navigation sidebar
-        st.sidebar.title("🎯 Navigation")
+        st.sidebar.title("Navigation")
         
         # Create selectbox with error handling
         try:
@@ -106,11 +106,6 @@ def main():
                 raise ValueError("No pages available")
                 
             selected_title = st.sidebar.selectbox("Choose a page:", page_options)
-            
-            # Add app status indicator
-            with st.sidebar:
-                st.markdown("---")
-                st.success("✅ Application Ready")
         
         except Exception as e:
             logger.error(f"Navigation UI error: {e}")
@@ -167,4 +162,4 @@ def main():
             st.rerun()
 
 if __name__ == "__main__":
-    main() 
+    main()

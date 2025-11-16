@@ -1,0 +1,1 @@
+"""Excel-specific components package."""

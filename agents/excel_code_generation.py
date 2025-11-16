@@ -305,7 +305,8 @@ SEABORN PALETTE GUIDANCE:
 - For category-specific colors: palette = create_category_palette(df['category_col'].unique())
 - For general seaborn plots: palette = get_professional_colors()['colors'][:n_categories]
 - Always slice colors to match the number of categories to avoid warnings
-- When using seaborn with palette, assign the categorical column to 'hue' and set legend=False to avoid deprecation warnings
+- When using seaborn with palette, assign the categorical column to 'hue'
+- To control legend display, use ax.legend() or ax.get_legend().remove() after plotting, NOT legend=False parameter
 
 MATPLOTLIB BEST PRACTICES:
 - Always use the 'ax' object for axis operations, NOT the 'fig' object
@@ -572,7 +573,8 @@ SEABORN PALETTE GUIDANCE:
 - For category-specific colors: palette = create_category_palette(df['category_col'].unique())
 - For general seaborn plots: palette = get_professional_colors()['colors'][:n_categories]
 - Always slice colors to match the number of categories to avoid warnings
-- When using seaborn with palette, assign the categorical column to 'hue' and set legend=False to avoid deprecation warnings
+- When using seaborn with palette, assign the categorical column to 'hue'
+- To control legend display, use ax.legend() or ax.get_legend().remove() after plotting, NOT legend=False parameter
 
 MATPLOTLIB BEST PRACTICES:
 - Always use the 'ax' object for axis operations, NOT the 'fig' object

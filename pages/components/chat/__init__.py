@@ -1,0 +1,1 @@
+"""Chat interface components package."""

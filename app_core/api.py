@@ -254,8 +254,26 @@ def _wrap_gemini_response(gemini_response):
         def __init__(self, text):
             self.choices = [MockChoice(text)]
     
-    # Get text from Gemini response safely
-    response_text = getattr(gemini_response, 'text', '')
+    # Get text from Gemini response safely with better error handling
+    try:
+        response_text = gemini_response.text
+    except ValueError as e:
+        # Handle blocked responses (finish_reason = SAFETY, etc.)
+        if hasattr(gemini_response, 'candidates') and gemini_response.candidates:
+            candidate = gemini_response.candidates[0]
+            finish_reason = getattr(candidate, 'finish_reason', None)
+            safety_ratings = getattr(candidate, 'safety_ratings', [])
+            
+            error_msg = f"Gemini API blocked the response (finish_reason={finish_reason})"
+            if safety_ratings:
+                error_msg += f"\nSafety ratings: {safety_ratings}"
+            
+            logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg) from e
+        else:
+            logger.error(f"❌ Failed to get text from Gemini response: {e}")
+            raise
+    
     return MockResponse(response_text)
 
 def _wrap_gemini_streaming_response(gemini_stream):

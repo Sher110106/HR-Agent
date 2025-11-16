@@ -103,12 +103,12 @@ class NavigationRegistry:
         return self.pages.get(page_id)
     
     def get_page_titles(self) -> Dict[str, str]:
-        """Return mapping of page_id → "<icon> <title>"."""
+        """Return mapping of page_id → "<title>" (without icon)."""
         sorted_pages = sorted(
             self.pages.items(),
             key=lambda x: (x[1].order, x[1].title),
         )
-        return {page_id: f"{config.icon} {config.title}".strip() for page_id, config in sorted_pages}
+        return {page_id: config.title for page_id, config in sorted_pages}
     
     def get_pages_by_category(self, category: str) -> Dict[str, PageConfig]:
         """Get all pages in a specific category (future enhancement)."""
@@ -220,4 +220,4 @@ def register_page(page_id: str, *args, **kwargs) -> bool:
         description=description,
         order=order,
     )
-    return _nav_registry.register_page(page_id, config) 
+    return _nav_registry.register_page(page_id, config)
