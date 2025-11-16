@@ -1,7 +1,7 @@
 # Technical Manual – Business Analysis HR Agent
 
 > **Version 0.5**  
-> Last updated: January 2025
+> Last updated: October 2025
 
 ---
 
@@ -141,7 +141,7 @@ All runtime settings are centralised in environment variables. See **Configurati
 | `NVIDIA_API_KEY` | Auth key for NVIDIA model endpoint | — |
 | `AZURE_API_KEY` | Auth key for Azure OpenAI endpoint | — |
 | `AZURE_ENDPOINT` | Azure OpenAI endpoint URL | — |
-| `AZURE_API_VERSION` | Azure API version | `2024-02-15-preview` |
+| `AZURE_API_VERSION` | Azure API version | `2025-10-01-preview` |
 | `AZURE_DEPLOYMENT_NAME` | Azure deployment name | `gpt-4` |
 | `STREAMLIT_SERVER_PORT` | Local dev port | `8501` |
 | `LOG_LEVEL` | Python logging level | `INFO` |
